@@ -10,7 +10,7 @@ psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 scaled_PIDksmall=95       # PID proportional constant. Since decimal numbers is difficult to work with, the PID constant is scaled  to have integer values
-scaled_PIDklarge=102       # PID proportional constant, when we have to cover the high part
+scaled_PIDklarge=$scaled_PIDksmall       # PID proportional constant, when we have to cover the high part
 scaled_PID_factor=100      # Scaling value to operate with integers
 
 #echo "Starting SyncE-PTP Phase Adjustment ($N samples)..."
