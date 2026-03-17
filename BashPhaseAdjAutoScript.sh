@@ -63,13 +63,15 @@ fi
 
 # Apply the correction (it should be provided in picoseconds)
 if [ "$AVERAGE" -gt "$psCLK_OUTperiodHalf" ]; then
-    CORRECTIONscaled=$(((scaled_PIDklarge * AVERAGE) / (scaled_PID_factor)))
+    CORRECTIONscaled=$(((scaled_PIDklarge * ( psCLK_OUTperiod - AVERAGE )) / (scaled_PID_factor)))
 else
     CORRECTIONscaled=$(((scaled_PIDksmall * AVERAGE) / (scaled_PID_factor)))
 fi
 
 if [ "$CORRECTIONscaled" -ge "$psCLK_OUTperiod" ]; then
     CORRECTIONscaled=$((CORRECTIONscaled - psCLK_OUTperiod))
+elif [ "$CORRECTIONscaled" -le "-$psCLK_OUTperiod" ]; then
+    CORRECTIONscaled=$((CORRECTIONscaled + psCLK_OUTperiod))
 fi
 
 CORRECTION=$(printf -- "0.%012d" "$CORRECTIONscaled")
