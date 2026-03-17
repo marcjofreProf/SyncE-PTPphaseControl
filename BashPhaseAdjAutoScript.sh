@@ -74,7 +74,17 @@ elif [ "$CORRECTIONscaled" -le "-$psCLK_OUTperiod" ]; then
     CORRECTIONscaled=$((CORRECTIONscaled + psCLK_OUTperiod))
 fi
 
-CORRECTION=$(printf -- "0.%012d" "$CORRECTIONscaled")
+ABS_CORRECTION=${CORRECTIONscaled#-}
+
+# Determine the sign
+if [[ "$CORRECTIONscaled" == -* ]]; then
+    SIGN="-"
+else
+    SIGN=""
+fi
+
+# We use the absolute value for padding to avoid "-" inside the zeros
+CORRECTION=$(printf -- "%s0.%012d" "$SIGN" "$ABS_CORRECTION")
 
 #echo "Applying correction: $CORRECTION ns to $INTERFACE"
 sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
