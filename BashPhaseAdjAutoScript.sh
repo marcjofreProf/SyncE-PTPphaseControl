@@ -25,7 +25,7 @@ do
 
     sudo phc_ctl $INTERFACE -- phaseadj 0
 
-    # Give time to return the info thorugh the kernel and pause a bit the loop
+    # Give time to return the info through the kernel and pause a bit the loop (also to account for a prolonget measurement so that ptp4l swings are averaged out)
     sleep 0.5
 
     # We look for our prefix, take the last line, and extract the number
