@@ -3,13 +3,13 @@
 
 # --- Configuration ---
 INTERFACE="eth0"
-N=20                # Number of samples to average
+N=50                # Number of samples to average
 SUM=0
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
-scaled_PIDksmall=95       # PID proportional constant. Since decimal numbers is difficult to work with, the PID constant is scaled  to have integer values
+scaled_PIDksmall=100       # PID proportional constant. Since decimal numbers is difficult to work with, the PID constant is scaled  to have integer values
 scaled_PIDklarge=$scaled_PIDksmall       # PID proportional constant, when we have to cover the high part
 scaled_PID_factor=100      # Scaling value to operate with integers
 
@@ -21,11 +21,13 @@ HAS_LARGE=0
 # Loop N times to collect samples
 for (( i=1; i<=$N; i++ ))
 do
-    # Run phc_ctl and extract the numeric value (assuming output is like "offset: 123")
+    # Pause a bit the loop (also to account for a prolonged measurement so that ptp4l swings are averaged out)
+    sleep 1.5
 
+    # Run phc_ctl and extract the numeric value (assuming output is like "offset: 123")
     sudo phc_ctl $INTERFACE -- phaseadj 0
 
-    # Give time to return the info through the kernel and pause a bit the loop (also to account for a prolonget measurement so that ptp4l swings are averaged out)
+    # Give time to return the info through the kernel
     sleep 0.5
 
     # We look for our prefix, take the last line, and extract the number
