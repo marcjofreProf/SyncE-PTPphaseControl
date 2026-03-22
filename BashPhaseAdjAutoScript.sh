@@ -22,7 +22,7 @@ HAS_LARGE=0
 for (( i=1; i<=$N; i++ ))
 do
     # Pause a bit the loop (also to account for a prolonged measurement so that ptp4l swings are averaged out)
-    sleep 1.5
+    sleep 2.0
 
     # Run phc_ctl and extract the numeric value (assuming output is like "offset: 123")
     sudo phc_ctl $INTERFACE -- phaseadj 0
