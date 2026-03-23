@@ -3,7 +3,7 @@
 
 # --- Configuration ---
 INTERFACE="eth0"
-N=50                # Number of samples to average
+N=25                # Number of samples to average
 SUM=0               # Initialization of the value
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 
@@ -21,14 +21,14 @@ HAS_LARGE=0
 # Loop N times to collect samples
 for (( i=1; i<=$N; i++ ))
 do
-    # Pause a bit the loop (also to account for a prolonged measurement so that ptp4l swings are averaged out)
-    sleep 2.0
+    # Pause a bit the loop so that ptp4l does not suffer from errors not being able to transmitt packets.
+    sleep 1.1 # Very important the sleep time because it determines the maximum changing frequency recoverable from the script
 
     # Run phc_ctl and extract the numeric value (assuming output is like "offset: 123")
     sudo phc_ctl $INTERFACE -- phaseadj 0
 
     # Give time to return the info through the kernel
-    sleep 0.5
+    sleep 0.1
 
     # We look for our prefix, take the last line, and extract the number
     val=$(dmesg | grep "PHC_PHASE_RESULT:" | tail -1 | awk -F': ' '{print $NF}')
