@@ -4,7 +4,7 @@
 # --- Configuration ---
 INTERFACE="eth0"
 N=50                # Number of samples to average
-SUM=0
+SUM=0               # Initialization of the value
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
