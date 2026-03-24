@@ -92,13 +92,13 @@ while true; do
         # --- PI-Controller Math ---
         # ==========================================
 
-        # 1. Calculate the Signed Error (Negative Feedback)
+        # 1. Calculate the Signed Error (Hardware-Matched Polarity)
         if [ "$AVERAGE" -gt "$psCLK_OUTperiodHalf" ]; then
-            # Measured high -> negative error -> positive correction
-            ERROR=$(( psCLK_OUTperiod - AVERAGE ))
+            # e.g., Measured 90320. We need to apply a NEGATIVE adjustment to push it toward 100000.
+            ERROR=$(( AVERAGE - psCLK_OUTperiod ))
         else
-            # Measured low -> positive error -> negative correction
-            ERROR=$(( -AVERAGE ))
+            # e.g., Measured 2000. We need to apply a POSITIVE adjustment to push it toward 0.
+            ERROR=$AVERAGE
         fi
 
         # 2. Add Error to Integral Accumulator (Persists across loop iterations)
