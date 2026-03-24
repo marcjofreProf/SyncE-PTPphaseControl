@@ -2,8 +2,9 @@
 # Bash scrip to automatically execute the phase adjustment algorithm for SynE-PTP
 
 # --- Configuration ---
+PlotInfo=false       # Plot extra information ot the user: true or false
 INTERFACE="eth0"
-N=25                # Number of samples to average
+N=5                # Number of samples to average
 SUM=0               # Initialization of the value
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 
@@ -36,7 +37,12 @@ do
     if [[ -z "$val" ]]; then
         echo "Error: Could not read offset from $INTERFACE at sample $i"
         continue
+    else
+        if [ "$PlotInfo" = "true" ]; then
+            echo "PHC_PHASE_RESULT: $val ps"
+        fi
     fi
+
     # Store in array
     valArray[$i]=$val
 
