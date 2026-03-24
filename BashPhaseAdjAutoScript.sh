@@ -1,14 +1,22 @@
 #!/bin/bash
 # Bash script to automatically execute the PI phase adjustment algorithm for SynE-PTP
 # Usage: 
-#   ./BashPhaseAdjAutoScript.sh       (Runs once)
-#   ./BashPhaseAdjAutoScript.sh 120   (Runs continuously, waiting 120s between adjustments)
+#   ./BashPhaseAdjAutoScript.sh             (Runs once, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
 
 # --- CLI Arguments ---
-# If argument 1 is missing, default to 0. Otherwise, ensure it's a valid number.
+# 1. Interval Argument
 INTERVAL=${1:-0}
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]]; then
-    echo "Error: Interval argument must be a positive integer (e.g., 120)."
+    echo "Error: Interval argument must be a positive integer (e.g., 15)."
+    exit 1
+fi
+
+# 2. Target Offset Argument (Systematic Phase Setpoint in ps)
+TARGET_OFFSET=${2:-0}
+if ! [[ "$TARGET_OFFSET" =~ ^-?[0-9]+$ ]]; then
+    echo "Error: Target offset must be an integer (e.g., -1000 or 500)."
     exit 1
 fi
 
@@ -29,9 +37,9 @@ scaled_PIDi=5              # Integral gain (0.05) - Keep this low!
 INTEGRAL_ACCUM=0
 
 if [ "$INTERVAL" -gt 0 ]; then
-    echo "Starting SyncE-PTP PI Phase Controller (Continuous mode: ${INTERVAL}s interval)..."
+    echo "Starting SyncE-PTP PI Phase Controller (Continuous: ${INTERVAL}s interval | Target: ${TARGET_OFFSET}ps)..."
 else
-    echo "Starting SyncE-PTP PI Phase Controller (Single-shot mode)..."
+    echo "Starting SyncE-PTP PI Phase Controller (Single-shot mode | Target: ${TARGET_OFFSET}ps)..."
 fi
 
 # ==========================================
@@ -82,7 +90,12 @@ while true; do
     if [ "$VALID_SAMPLES" -eq 0 ]; then
         echo "Error: No valid samples collected. Skipping this interval."
     else
-        AVERAGE=$(( SUM / VALID_SAMPLES ))
+        RAW_AVERAGE=$(( SUM / VALID_SAMPLES ))
+        
+        # Apply the systematic phase target offset!
+        AVERAGE=$(( RAW_AVERAGE - TARGET_OFFSET ))
+        
+        # Keep the shifted average mathematically bounded [0, fullperiod]
         AVERAGE=$(( AVERAGE % psCLK_OUTperiod ))
         if [ "$AVERAGE" -lt 0 ]; then
             AVERAGE=$(( AVERAGE + psCLK_OUTperiod ))
@@ -94,10 +107,8 @@ while true; do
 
         # 1. Calculate the Signed Error (Hardware-Matched Polarity)
         if [ "$AVERAGE" -gt "$psCLK_OUTperiodHalf" ]; then
-            # e.g., Measured 90320. We need to apply a NEGATIVE adjustment to push it toward 100000.
             ERROR=$(( AVERAGE - psCLK_OUTperiod ))
         else
-            # e.g., Measured 2000. We need to apply a POSITIVE adjustment to push it toward 0.
             ERROR=$AVERAGE
         fi
 
@@ -140,7 +151,10 @@ while true; do
 
         if [ "$PlotInfo" = "true" ]; then
             echo "--- PID DIAGNOSTICS ---"
-            echo "Measured Avg: $AVERAGE ps"
+            echo "Measured Raw Avg: $RAW_AVERAGE ps"
+            if [ "$TARGET_OFFSET" -ne 0 ]; then
+                echo "Target Offset applied: $TARGET_OFFSET ps -> Shifted Avg: $AVERAGE ps"
+            fi
             echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
             echo "Applying P-Term: $P_TERM ps | I-Term: $I_TERM ps"
             echo "Total adjustment: $CORRECTIONscaled ps"
