@@ -1,10 +1,11 @@
 #!/bin/bash
 # Bash scrip to automatically execute the phase adjustment algorithm for SynE-PTP
+# To call the script iteratively (for isntance every 120 s) run it as watch -n 120 ./BashPhaseAdjAutoScript.sh
 
 # --- Configuration ---
 PlotInfo=false       # Plot extra information ot the user: true or false
 INTERFACE="eth0"
-N=25                # Number of samples to average
+N=20                # Number of samples to average
 SUM=0               # Initialization of the value
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 
@@ -23,7 +24,7 @@ HAS_LARGE=0
 for (( i=1; i<=$N; i++ ))
 do
     # Pause a bit the loop so that ptp4l does not suffer from errors not being able to transmitt packets.
-    sleep 1.4 # Very important the sleep time because it determines the maximum changing frequency recoverable from the script
+    sleep 1.9 # Very important the sleep time because it determines the maximum changing frequency recoverable from the script
 
     # Run phc_ctl and extract the numeric value (assuming output is like "offset: 123")
     sudo phc_ctl $INTERFACE -- phaseadj 0
