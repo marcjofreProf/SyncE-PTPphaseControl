@@ -23,13 +23,13 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=5                 # Lowered to 5 to reduce "dead time" delay
+N=15                 # Lowered to 5 to reduce "dead time" delay
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=100      # Scaling value to operate with integers
-scaled_PIDp=40             # Proportional gain (0.40)
+scaled_PIDp=80             # Proportional gain (0.40)
 scaled_PIDi=5              # Integral gain (0.05) - Keep this low!
 
 # --- Initialize Persistent Memory ---
