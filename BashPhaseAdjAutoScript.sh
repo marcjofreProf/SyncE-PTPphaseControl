@@ -30,7 +30,7 @@ psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=100      # Scaling value to operate with integers
-scaled_PIDp=25             # Proportional gain (0.45)
+scaled_PIDp=10             # Proportional gain (0.45)
 scaled_PIDi=5              # Integral gain (0.05) - Keep this low!
 
 # --- Initialize Persistent Memory ---
