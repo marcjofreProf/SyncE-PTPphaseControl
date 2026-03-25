@@ -23,13 +23,14 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=15                 # Lowered to 5 to reduce "dead time" delay
+N=15                # Number of samples to collect per interval
+TRIM_COUNT=3        # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=100      # Scaling value to operate with integers
-scaled_PIDp=80             # Proportional gain (0.40)
+scaled_PIDp=80             # Proportional gain (0.80)
 scaled_PIDi=5              # Integral gain (0.05) - Keep this low!
 
 # --- Initialize Persistent Memory ---
@@ -48,7 +49,7 @@ fi
 while true; do
 
     # --- Runtime Variables for this run ---
-    SUM=0
+    UNWRAPPED_SAMPLES=()
     VALID_SAMPLES=0
     wrap_offset=0
     prev_val=""
@@ -67,7 +68,7 @@ while true; do
             continue
         fi
 
-        # Sequential Unwrapping
+        # Sequential Unwrapping (Untouched from original)
         if [ "$VALID_SAMPLES" -eq 0 ]; then
             prev_val=$val
             unwrapped_val=$val
@@ -82,7 +83,8 @@ while true; do
             unwrapped_val=$(( val + wrap_offset ))
         fi
 
-        SUM=$(( SUM + unwrapped_val ))
+        # Store the unwrapped value in our array
+        UNWRAPPED_SAMPLES+=("$unwrapped_val")
         VALID_SAMPLES=$(( VALID_SAMPLES + 1 ))
     done
 
@@ -90,7 +92,33 @@ while true; do
     if [ "$VALID_SAMPLES" -eq 0 ]; then
         echo "Error: No valid samples collected. Skipping this interval."
     else
-        RAW_AVERAGE=$(( SUM / VALID_SAMPLES ))
+        # ==========================================
+        # --- Trimmed Averaging Math ---
+        # ==========================================
+        if [ "$VALID_SAMPLES" -le $(( TRIM_COUNT * 2 )) ]; then
+            # Not enough samples to trim safely, fallback to a normal average
+            echo "Warning: Not enough samples for trimmed average. Doing normal mean."
+            TRIMMED_SUM=0
+            for val in "${UNWRAPPED_SAMPLES[@]}"; do
+                TRIMMED_SUM=$(( TRIMMED_SUM + val ))
+            done
+            RAW_AVERAGE=$(( TRIMMED_SUM / VALID_SAMPLES ))
+        else
+            # Sort the unwrapped array numerically
+            SORTED=($(printf "%s\n" "${UNWRAPPED_SAMPLES[@]}" | sort -n))
+            
+            TRIMMED_SUM=0
+            TRIMMED_COUNT=0
+            
+            # Sum the values, skipping the first $TRIM_COUNT and last $TRIM_COUNT items
+            for (( j=TRIM_COUNT; j<VALID_SAMPLES-TRIM_COUNT; j++ ))
+            do
+                TRIMMED_SUM=$(( TRIMMED_SUM + SORTED[j] ))
+                TRIMMED_COUNT=$(( TRIMMED_COUNT + 1 ))
+            done
+            
+            RAW_AVERAGE=$(( TRIMMED_SUM / TRIMMED_COUNT ))
+        fi
         
         # Apply the systematic phase target offset!
         AVERAGE=$(( RAW_AVERAGE - TARGET_OFFSET ))
@@ -126,6 +154,7 @@ while true; do
         P_TERM=$(( (scaled_PIDp * ERROR) / scaled_PID_factor ))
         I_TERM=$(( (scaled_PIDi * INTEGRAL_ACCUM) / scaled_PID_factor ))
 
+        # Original calculation restored (No sign reversal)
         CORRECTIONscaled=$(( P_TERM + I_TERM ))
 
         # 5. Boundary Protection
@@ -151,6 +180,9 @@ while true; do
 
         if [ "$PlotInfo" = "true" ]; then
             echo "--- PID DIAGNOSTICS ---"
+            if [ "$VALID_SAMPLES" -gt $(( TRIM_COUNT * 2 )) ]; then
+                echo "Trimmed out $TRIM_COUNT high/low samples. Averaged middle $TRIMMED_COUNT."
+            fi
             echo "Measured Raw Avg: $RAW_AVERAGE ps"
             if [ "$TARGET_OFFSET" -ne 0 ]; then
                 echo "Target Offset applied: $TARGET_OFFSET ps -> Shifted Avg: $AVERAGE ps"
