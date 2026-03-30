@@ -2,8 +2,8 @@
 # Bash script to automatically execute the PI phase adjustment algorithm for SynE-PTP
 # Usage: 
 #   ./BashPhaseAdjAutoScript.sh             (Runs once, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
+#   ./BashPhaseAdjAutoScript.sh 25          (Runs continuously, 25s interval, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh 25 500      (Runs continuously, 25s interval, locks phase at +500 ps)
 
 # --- CLI Arguments ---
 # 1. Interval Argument
