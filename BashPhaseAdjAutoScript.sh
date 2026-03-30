@@ -23,15 +23,15 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=10                # Number of samples to collect per interval
-TRIM_COUNT=3        # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
+N=25                # Number of samples to collect per interval
+TRIM_COUNT=7        # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=100      # Scaling value to operate with integers
 scaled_PIDp=10             # Proportional gain (0.45)
-scaled_PIDi=5              # Integral gain (0.05) - Keep this low!
+scaled_PIDi=2              # Integral gain (0.05) - Keep this low!
 
 # --- Initialize Persistent Memory ---
 # Because the script stays alive, this variable simply persists in RAM!
