@@ -57,14 +57,18 @@ while true; do
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
     do
+        # 1. Clear the kernel ring buffer so we don't read stale data
+        sudo dmesg -c > /dev/null
+        
         sleep 1.9 
         sudo phc_ctl $INTERFACE -- phaseadj 0 > /dev/null 2>&1
         sleep 0.1
 
         val=$(dmesg | grep "PHC_PHASE_RESULT:" | tail -1 | awk -F': ' '{print $NF}')
         
-        if [[ -z "$val" ]]; then
-            echo "Error: Could not read offset from $INTERFACE at sample $i"
+        # Strict check: Is it non-empty AND a valid integer?
+        if ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
+            echo "Error: Invalid or missing offset from $INTERFACE at sample $i (Got: '$val')"
             continue
         fi
 
