@@ -2,8 +2,8 @@
 # Bash script to automatically execute the PI phase adjustment algorithm for SynE-PTP
 # Usage: 
 #   ./BashPhaseAdjAutoScript.sh             (Runs once, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 25          (Runs continuously, 25s interval, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 25 500      (Runs continuously, 25s interval, locks phase at +500 ps)
+#   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
 
 # --- CLI Arguments ---
 # 1. Interval Argument
@@ -30,8 +30,8 @@ psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=100      # Scaling value to operate with integers
-scaled_PIDp=25             # Proportional gain (0.45)
-scaled_PIDi=2              # Integral gain (0.05) - Keep this low!
+scaled_PIDp=25             # Proportional gain (0.25)
+scaled_PIDi=2              # Integral gain (0.02) - Keep this low!
 
 # --- Initialize Persistent Memory ---
 # Because the script stays alive, this variable simply persists in RAM!
@@ -72,7 +72,7 @@ while true; do
             continue
         fi
 
-        # Sequential Unwrapping (Untouched from original)
+        # Sequential Phase Unwrapping
         if [ "$VALID_SAMPLES" -eq 0 ]; then
             prev_val=$val
             unwrapped_val=$val
@@ -123,49 +123,46 @@ while true; do
             
             RAW_AVERAGE=$(( TRIMMED_SUM / TRIMMED_COUNT ))
         fi
-        
-        # Apply the systematic phase target offset!
-        AVERAGE=$(( RAW_AVERAGE - TARGET_OFFSET ))
-        
-        # Keep the shifted average mathematically bounded [0, fullperiod]
-        AVERAGE=$(( AVERAGE % psCLK_OUTperiod ))
-        if [ "$AVERAGE" -lt 0 ]; then
-            AVERAGE=$(( AVERAGE + psCLK_OUTperiod ))
-        fi
 
         # ==========================================
-        # --- PI-Controller Math ---
+        # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
 
-        # 1. Calculate the Signed Error (Hardware-Matched Polarity)
-        if [ "$AVERAGE" -gt "$psCLK_OUTperiodHalf" ]; then
-            ERROR=$(( AVERAGE - psCLK_OUTperiod ))
-        else
-            ERROR=$AVERAGE
+        # 1. Calculate Signed Error (Setpoint - Process Variable)
+        ERROR=$(( TARGET_OFFSET - RAW_AVERAGE ))
+
+        # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
+        # This fixes the circular wrap-around logic for the setpoint.
+        ERROR=$(( ERROR % psCLK_OUTperiod ))
+        if [ "$ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
+            ERROR=$(( ERROR - psCLK_OUTperiod ))
+        elif [ "$ERROR" -lt "-$psCLK_OUTperiodHalf" ]; then
+            ERROR=$(( ERROR + psCLK_OUTperiod ))
         fi
 
-        # 2. Add Error to Integral Accumulator (Persists across loop iterations)
+        # 3. Add Error to Integral Accumulator
         INTEGRAL_ACCUM=$(( INTEGRAL_ACCUM + ERROR ))
 
-        # 3. Anti-Windup (Cap the integral accumulator at ± half period)
+        # 4. Anti-Windup (Cap the integral accumulator at ± half period)
         if [ "$INTEGRAL_ACCUM" -gt "$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=$psCLK_OUTperiodHalf
         elif [ "$INTEGRAL_ACCUM" -lt "-$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=-$psCLK_OUTperiodHalf
         fi
 
-        # 4. Calculate P and I terms
+        # 5. Calculate P and I terms
         P_TERM=$(( (scaled_PIDp * ERROR) / scaled_PID_factor ))
         I_TERM=$(( (scaled_PIDi * INTEGRAL_ACCUM) / scaled_PID_factor ))
 
-        # Original calculation restored (No sign reversal)
         CORRECTIONscaled=$(( P_TERM + I_TERM ))
 
-        # 5. Boundary Protection
-        if [ "$CORRECTIONscaled" -ge "$psCLK_OUTperiod" ]; then
-            CORRECTIONscaled=$((CORRECTIONscaled - psCLK_OUTperiod))
-        elif [ "$CORRECTIONscaled" -le "-$psCLK_OUTperiod" ]; then
-            CORRECTIONscaled=$((CORRECTIONscaled + psCLK_OUTperiod))
+        # 6. Final Phase Output Wrap (Shortest Path logic for execution)
+        # Prevents stepping by e.g. +80ns when -20ns achieves the exact same phase.
+        CORRECTIONscaled=$(( CORRECTIONscaled % psCLK_OUTperiod ))
+        if [ "$CORRECTIONscaled" -gt "$psCLK_OUTperiodHalf" ]; then
+            CORRECTIONscaled=$(( CORRECTIONscaled - psCLK_OUTperiod ))
+        elif [ "$CORRECTIONscaled" -lt "-$psCLK_OUTperiodHalf" ]; then
+            CORRECTIONscaled=$(( CORRECTIONscaled + psCLK_OUTperiod ))
         fi
 
         # ==========================================
@@ -180,6 +177,7 @@ while true; do
             SIGN=""
         fi
 
+        # Format picoseconds into fractional seconds
         CORRECTION=$(printf -- "%s0.%012d" "$SIGN" "$ABS_CORRECTION")
 
         if [ "$PlotInfo" = "true" ]; then
@@ -189,11 +187,11 @@ while true; do
             fi
             echo "Measured Raw Avg: $RAW_AVERAGE ps"
             if [ "$TARGET_OFFSET" -ne 0 ]; then
-                echo "Target Offset applied: $TARGET_OFFSET ps -> Shifted Avg: $AVERAGE ps"
+                echo "Target Offset: $TARGET_OFFSET ps"
             fi
             echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
             echo "Applying P-Term: $P_TERM ps | I-Term: $I_TERM ps"
-            echo "Total adjustment: $CORRECTIONscaled ps"
+            echo "Total calculated step: $CORRECTIONscaled ps"
         fi
 
         sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
