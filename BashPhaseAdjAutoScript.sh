@@ -48,6 +48,9 @@ fi
 # ==========================================
 while true; do
 
+    # Clear the terminal at the start of each new interval
+    clear
+
     # --- Runtime Variables for this run ---
     UNWRAPPED_SAMPLES=()
     VALID_SAMPLES=0
