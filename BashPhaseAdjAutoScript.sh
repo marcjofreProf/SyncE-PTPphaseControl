@@ -177,7 +177,7 @@ while true; do
         # Force a large correction
         # ABS_CORRECTION=$((ABS_CORRECTION+psCLK_OUTperiod))
 
-        # Check if ptp4l is currently running
+        # Check if ptp4l is currently running. Somehow it is a bad behavior that when ptp4l running, the phase aligment procedure needs sort of the following (why 10? TODO)
         if pgrep "ptp4l" > /dev/null; then
             # If it is running, multiply the correction by 10
             ABS_CORRECTION=$((ABS_CORRECTION * 10))
