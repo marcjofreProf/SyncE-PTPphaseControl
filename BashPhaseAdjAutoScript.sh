@@ -178,10 +178,10 @@ while true; do
         # ABS_CORRECTION=$((ABS_CORRECTION+psCLK_OUTperiod))
 
         # Check if ptp4l is currently running
-        if pgrep -x "ptp4l" > /dev/null; then
+        if pgrep "ptp4l" > /dev/null; then
             # If it is running, multiply the correction by 10
             ABS_CORRECTION=$((ABS_CORRECTION * 10))
-            echo "ptp4l running applying a multiplication factor"
+            echo "ptp4l running, applying a multiplication factor"
         fi
 
         if [[ "$CORRECTIONscaled" == -* ]]; then
