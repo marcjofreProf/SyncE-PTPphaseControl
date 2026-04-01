@@ -131,8 +131,8 @@ while true; do
         # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
 
-        # 1. Calculate Signed Error (Setpoint - Process Variable)
-        ERROR=$(( TARGET_OFFSET - RAW_AVERAGE ))
+        # 1. Calculate Signed Error (Inverted Logic: Process Variable - Setpoint)
+        ERROR=$(( RAW_AVERAGE - TARGET_OFFSET ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
