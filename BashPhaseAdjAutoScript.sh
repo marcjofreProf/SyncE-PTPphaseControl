@@ -167,12 +167,15 @@ while true; do
         elif [ "$CORRECTIONscaled" -lt "-$psCLK_OUTperiodHalf" ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled + psCLK_OUTperiod ))
         fi
-        
+
         # ==========================================
         # --- Execution ---
         # ==========================================
 
         ABS_CORRECTION=${CORRECTIONscaled#-}
+
+        # Force a large correction
+        # ABS_CORRECTION=$((ABS_CORRECTION+psCLK_OUTperiod))
 
         if [[ "$CORRECTIONscaled" == -* ]]; then
             SIGN="-"
