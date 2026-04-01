@@ -167,7 +167,7 @@ while true; do
         elif [ "$CORRECTIONscaled" -lt "-$psCLK_OUTperiodHalf" ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled + psCLK_OUTperiod ))
         fi
-
+        
         # ==========================================
         # --- Execution ---
         # ==========================================
