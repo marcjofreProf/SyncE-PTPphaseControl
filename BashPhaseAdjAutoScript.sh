@@ -2,8 +2,8 @@
 # Bash script to automatically execute the PI phase adjustment algorithm for SynE-PTP
 # Usage: 
 #   ./BashPhaseAdjAutoScript.sh             (Runs once, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
+#   ./BashPhaseAdjAutoScript.sh 10          (Runs continuously, 15s interval, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh 10 500      (Runs continuously, 15s interval, locks phase at +500 ps)
 
 # --- CLI Arguments ---
 # 1. Interval Argument
@@ -23,7 +23,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=15                # Number of samples to collect per interval
+N=50                # Number of samples to collect per interval
 TRIM_COUNT=4        # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=100000      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -63,9 +63,9 @@ while true; do
         # 1. Clear the kernel ring buffer so we don't read stale data
         sudo dmesg -c > /dev/null
         
-        sleep 1.9 
+        sleep 0.20
         sudo phc_ctl $INTERFACE -- phaseadj 0 > /dev/null 2>&1
-        sleep 0.1
+        sleep 0.05
 
         val=$(dmesg | grep "PHC_PHASE_RESULT:" | tail -1 | awk -F': ' '{print $NF}')
         
