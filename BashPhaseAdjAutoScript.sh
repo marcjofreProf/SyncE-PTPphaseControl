@@ -178,11 +178,12 @@ while true; do
         # ABS_CORRECTION=$((ABS_CORRECTION+psCLK_OUTperiod))
 
         # Check if ptp4l is currently running. Somehow it is a bad behavior that when ptp4l running, the phase aligment procedure needs sort of the following (why 10? TODO)
-        if pgrep "ptp4l" > /dev/null; then
-            # If it is running, multiply the correction by 10
-            ABS_CORRECTION=$((ABS_CORRECTION * 10))
-            echo "ptp4l running, applying a multiplication factor"
-        fi
+        # Commented because done in the DP83640 driver
+        #if pgrep "ptp4l" > /dev/null; then
+        #    # If it is running, multiply the correction by 10
+        #    ABS_CORRECTION=$((ABS_CORRECTION * 10))
+        #    echo "ptp4l running, applying a multiplication factor"
+        #fi
 
         if [[ "$CORRECTIONscaled" == -* ]]; then
             SIGN="-"
