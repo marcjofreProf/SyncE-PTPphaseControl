@@ -42,7 +42,15 @@ pkill -f "TimeTagger" 2>/dev/null
 echo "Allowing USB interface to reset..."
 sleep 3 
 
+# =========================================================
+#   MEASUREMENT PARAMETERS (SINGLE SOURCE OF TRUTH)
+# =========================================================
 OFFSET_PS=${1:-0}
+TRIGGER_VOLTAGE=1.5
+DURATION_S=10
+BINWIDTH_PS=25
+N_BINS=1000
+
 OUTPUT_DIR="../../TTUdataMeas"
 OUTPUT_FILE="${OUTPUT_DIR}/histogram_offset_${OFFSET_PS}ps.txt"
 PLOT_FILE="${OUTPUT_DIR}/histogram_offset_${OFFSET_PS}ps.png"
@@ -54,12 +62,13 @@ export QT_QPA_PLATFORM=xcb
 echo "========================================================="
 echo "  Starting Correlation Measurement - Time Tagger 20      "
 echo "========================================================="
-echo "Channels: 2 and 3 | Offset: $OFFSET_PS ps"
-echo "Integration Time: 1 second (FOR TESTING)"
+echo "Channels: 2 and 3 | Offset: $OFFSET_PS ps | Thresholds: $TRIGGER_VOLTAGE V"
+echo "Integration Time: $DURATION_S seconds"
 echo "Output File: $OUTPUT_FILE"
 echo "Plot File: $PLOT_FILE"
 echo "========================================================="
 
+# --- 1. MAIN MEASUREMENT SCRIPT ---
 python3 - <<EOF
 import sys
 import time
@@ -74,9 +83,12 @@ plot_file = "$PLOT_FILE"
 
 ch_start = 2
 ch_stop = 3
-binwidth_ps = 25
-n_bins = 1000
-duration_s = 1
+
+# Reading parameters injected from Bash
+trigger_voltage = float("$TRIGGER_VOLTAGE")
+binwidth_ps = int("$BINWIDTH_PS")
+n_bins = int("$N_BINS")
+duration_s = int("$DURATION_S")
 
 tagger = None
 max_retries = 3
@@ -97,6 +109,11 @@ for attempt in range(max_retries):
             sys.exit(1)
 
 try:
+    # --- HARDWARE CONFIGURATION ---
+    print(f"-> Setting trigger levels for Channels {ch_start} and {ch_stop} to {trigger_voltage}V...")
+    tagger.setTriggerLevel(ch_start, trigger_voltage)
+    tagger.setTriggerLevel(ch_stop, trigger_voltage)
+    
     tagger.setDelaySoftware(ch_stop, delay_offset)
     
     corr = tt.Correlation(tagger, channel_1=ch_start, channel_2=ch_stop, binwidth=binwidth_ps, n_bins=n_bins)
@@ -109,7 +126,7 @@ try:
     
     line, = ax.step(corr.getIndex(), corr.getData(), where='mid', color='blue', alpha=0.8)
     
-    ax.set_title(f"Correlation (Offset: {delay_offset} ps)")
+    ax.set_title(f"Live Correlation (Offset: {delay_offset} ps)")
     ax.set_xlabel("Time (ps)")
     ax.set_ylabel("Counts")
     ax.grid(True, linestyle='--', alpha=0.6)
@@ -122,6 +139,8 @@ try:
         plt.pause(0.1)
         
     print("-> Acquisition finished. Saving data...")
+    plt.ioff()
+    plt.close(fig)
     
     with open(output_file, "w") as f:
         f.write("Time(ps)\tCounts\n")
@@ -130,27 +149,27 @@ try:
             
     print(f"-> SUCCESS: Data successfully saved to '{output_file}'")
     
+    # Save the plot with the threshold in the title for the PNG as well
+    plt.figure(figsize=(10, 6))
+    plt.step(corr.getIndex(), corr.getData(), where='mid', color='blue', alpha=0.8)
+    plt.title(f'Correlation (Offset: {delay_offset} ps, Threshold: {trigger_voltage} V)')
+    plt.xlabel('Time (ps)')
+    plt.ylabel('Counts')
+    plt.grid(True, linestyle='--', alpha=0.6)
     plt.savefig(plot_file)
     print(f"-> SUCCESS: Plot image successfully saved to '{plot_file}'")
 
-    # --- IMMEDIATE USB RELEASE ---
     print("-> Releasing Time Tagger hardware immediately...")
     tt.freeTimeTagger(tagger)
-    tagger = None # Set to None so the 'finally' block ignores it
+    tagger = None
     time.sleep(1)
-    print("-> Hardware successfully released. USB is now free for other programs.")
-
-    # --- KEEP PLOT OPEN ---
-    print("-> Interactive plot remains open. Close the window to exit the Python environment.")
-    plt.ioff()
-    plt.show(block=True) 
+    print("-> Hardware successfully released.")
 
 except Exception as e:
     print(f"ERROR: Could not execute measurement. Details: {e}")
     sys.exit(1)
 
 finally:
-    # This acts as a safety net in case an error happens BEFORE the immediate release
     if tagger is not None:
         try:
             tt.freeTimeTagger(tagger)
@@ -159,4 +178,32 @@ finally:
             pass
 EOF
 
-echo "Script execution completed."
+# --- 2. BACKGROUND PLOT VIEWER ---
+echo "-> Launching persistent background plot..."
+nohup python3 -c "
+import matplotlib
+matplotlib.use('Qt5Agg')
+import matplotlib.pyplot as plt
+
+t_vals, c_vals = [], []
+try:
+    with open('$OUTPUT_FILE', 'r') as f:
+        next(f) # Skip header
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) == 2:
+                t_vals.append(float(parts[0]))
+                c_vals.append(float(parts[1]))
+                
+    plt.figure(figsize=(10, 6))
+    plt.step(t_vals, c_vals, where='mid', color='blue', alpha=0.8)
+    plt.title('Final Correlation (Offset: $OFFSET_PS ps, Threshold: $TRIGGER_VOLTAGE V)')
+    plt.xlabel('Time (ps)')
+    plt.ylabel('Counts')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.show()
+except Exception:
+    pass
+" >/dev/null 2>&1 &
+
+echo "Script execution completed. You can now use your terminal."
