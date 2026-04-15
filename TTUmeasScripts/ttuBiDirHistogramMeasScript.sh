@@ -45,11 +45,13 @@ sleep 3
 # =========================================================
 #   MEASUREMENT PARAMETERS (SINGLE SOURCE OF TRUTH)
 # =========================================================
-OFFSET_PS=${1:-0}
-TRIGGER_VOLTAGE=1.5
-DURATION_S=10
+OFFSET_PS=${1:-0} # Offset between the capturing channels
+TRIGGER_VOLTAGE=1.0 # Threshold voltage value for the channels
+DURATION_S=10 # Duration in seconds of the measurement
 BINWIDTH_PS=25
 N_BINS=1000
+DECIMATION_FACTOR=2 # Takes 1 out of every N points at the end before saving
+SHOW_LIVE_PLOT="true" # Set to "true" to show live plotting, "false" to hide it
 
 OUTPUT_DIR="../../TTUdataMeas"
 OUTPUT_FILE="${OUTPUT_DIR}/histogram_offset_${OFFSET_PS}ps.txt"
@@ -63,7 +65,8 @@ echo "========================================================="
 echo "  Starting Correlation Measurement - Time Tagger 20      "
 echo "========================================================="
 echo "Channels: 2 and 3 | Offset: $OFFSET_PS ps | Thresholds: $TRIGGER_VOLTAGE V"
-echo "Integration Time: $DURATION_S seconds"
+echo "Integration Time: $DURATION_S seconds | Decimation: 1 out of $DECIMATION_FACTOR"
+echo "Live Plot Enabled: $SHOW_LIVE_PLOT"
 echo "Output File: $OUTPUT_FILE"
 echo "Plot File: $PLOT_FILE"
 echo "========================================================="
@@ -89,6 +92,8 @@ trigger_voltage = float("$TRIGGER_VOLTAGE")
 binwidth_ps = int("$BINWIDTH_PS")
 n_bins = int("$N_BINS")
 duration_s = int("$DURATION_S")
+decimation_factor = int("$DECIMATION_FACTOR")
+show_live_plot = "$SHOW_LIVE_PLOT".lower() in ['true', '1', 't', 'yes', 'y']
 
 tagger = None
 max_retries = 3
@@ -118,41 +123,54 @@ try:
     
     corr = tt.Correlation(tagger, channel_1=ch_start, channel_2=ch_stop, binwidth=binwidth_ps, n_bins=n_bins)
     
-    print(f"-> Acquiring data for {duration_s} seconds. Opening live plot window...")
+    print(f"-> Acquiring data for {duration_s} seconds...")
     corr.startFor(int(duration_s * 1e12))
     
-    plt.ion() 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    line, = ax.step(corr.getIndex(), corr.getData(), where='mid', color='blue', alpha=0.8)
-    
-    ax.set_title(f"Live Correlation (Offset: {delay_offset} ps)")
-    ax.set_xlabel("Time (ps)")
-    ax.set_ylabel("Counts")
-    ax.grid(True, linestyle='--', alpha=0.6)
-    plt.show()
-    
-    while corr.isRunning():
-        line.set_ydata(corr.getData())
-        ax.relim()
-        ax.autoscale_view()
-        plt.pause(0.1)
+    if show_live_plot:
+        plt.ion() 
+        fig, ax = plt.subplots(figsize=(10, 6))
         
-    print("-> Acquisition finished. Saving data...")
-    plt.ioff()
-    plt.close(fig)
+        line, = ax.step(corr.getIndex(), corr.getData(), where='mid', color='blue', alpha=0.8)
+        
+        ax.set_title(f"Live Correlation (Offset: {delay_offset} ps)")
+        ax.set_xlabel("Time (ps)")
+        ax.set_ylabel("Counts")
+        ax.grid(True, linestyle='--', alpha=0.6)
+        plt.show()
+    else:
+        print("-> Live plot disabled. Waiting for acquisition to finish in background...")
+    
+    # Wait for the measurement to complete
+    while corr.isRunning():
+        if show_live_plot:
+            line.set_ydata(corr.getData())
+            ax.relim()
+            ax.autoscale_view()
+            plt.pause(0.1)
+        else:
+            time.sleep(0.1)
+        
+    print("-> Acquisition finished. Processing decimation and saving data...")
+    if show_live_plot:
+        plt.ioff()
+        plt.close(fig)
+    
+    # --- DECIMATION AT THE END ---
+    # Take 1 out of every 'decimation_factor' points using Python array slicing
+    t_decimated = corr.getIndex()[::decimation_factor]
+    c_decimated = corr.getData()[::decimation_factor]
     
     with open(output_file, "w") as f:
         f.write("Time(ps)\tCounts\n")
-        for t, c in zip(corr.getIndex(), corr.getData()):
+        for t, c in zip(t_decimated, c_decimated):
             f.write(f"{int(t)}\t{int(c)}\n")
             
-    print(f"-> SUCCESS: Data successfully saved to '{output_file}'")
+    print(f"-> SUCCESS: Decimated data saved to '{output_file}'")
     
-    # Save the plot with the threshold in the title for the PNG as well
+    # Save the plot with the downsampled data
     plt.figure(figsize=(10, 6))
-    plt.step(corr.getIndex(), corr.getData(), where='mid', color='blue', alpha=0.8)
-    plt.title(f'Correlation (Offset: {delay_offset} ps, Threshold: {trigger_voltage} V)')
+    plt.step(t_decimated, c_decimated, where='mid', color='blue', alpha=0.8)
+    plt.title(f'Correlation (Offset: {delay_offset} ps, Decimated 1/{decimation_factor})')
     plt.xlabel('Time (ps)')
     plt.ylabel('Counts')
     plt.grid(True, linestyle='--', alpha=0.6)
@@ -197,7 +215,7 @@ try:
                 
     plt.figure(figsize=(10, 6))
     plt.step(t_vals, c_vals, where='mid', color='blue', alpha=0.8)
-    plt.title('Final Correlation (Offset: $OFFSET_PS ps, Threshold: $TRIGGER_VOLTAGE V)')
+    plt.title('Final Correlation (Offset: $OFFSET_PS ps, Decimated 1/$DECIMATION_FACTOR)')
     plt.xlabel('Time (ps)')
     plt.ylabel('Counts')
     plt.grid(True, linestyle='--', alpha=0.6)
