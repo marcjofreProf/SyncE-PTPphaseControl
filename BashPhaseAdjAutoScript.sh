@@ -23,8 +23,12 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=150               # Number of samples to collect per interval
-TRIM_COUNT=4        # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
+
+# Averaging Constraints
+MACRO_N=150         # Number of samples per interval during macro lock
+FINE_N=15           # Number of samples per interval during fine lock
+MACRO_TRIM=4        # Discard this many highest/lowest samples in macro mode
+FINE_TRIM=2         # Discard fewer samples in fine mode so we still have enough data
 
 # Original Macro Period Constraints
 ORIG_PERIOD=$(( 4000 * 10 ))          # 40,000 ps
@@ -38,6 +42,8 @@ LOSS_OF_LOCK_THRESHOLD=12000          # 1.5 * FINE_PERIOD (Allows for 8000ps HW 
 # Active Controller Constraints (Starts in Macro-Lock)
 psCLK_OUTperiod=$ORIG_PERIOD
 psCLK_OUTperiodHalf=$ORIG_HALF
+N=$MACRO_N
+TRIM_COUNT=$MACRO_TRIM
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
@@ -143,18 +149,22 @@ while true; do
 
         # 3. Lock/Unlock Logic
         if [ "$psCLK_OUTperiod" -eq "$FINE_PERIOD" ] && [ "$ABS_TRUE_ERROR" -gt "$LOSS_OF_LOCK_THRESHOLD" ]; then
-            # We drifted beyond the 12000 ps threshold (8000 ps HW jump + 4000 ps real drift). Revert to macro period.
+            # We drifted beyond the 12000 ps threshold. Revert to macro period and heavy averaging.
             psCLK_OUTperiod=$ORIG_PERIOD
             psCLK_OUTperiodHalf=$ORIG_HALF
+            N=$MACRO_N
+            TRIM_COUNT=$MACRO_TRIM
             if [ "$PlotInfo" = "true" ]; then
-                echo "!!! LOSS OF LOCK: True error ($ABS_TRUE_ERROR ps) exceeded 12000 ps. Reverting to macro period ($ORIG_PERIOD ps). !!!"
+                echo "!!! LOSS OF LOCK: True error ($ABS_TRUE_ERROR ps) exceeded 12000 ps. Reverting to MACRO lock ($ORIG_PERIOD ps, N=$N). !!!"
             fi
         elif [ "$psCLK_OUTperiod" -eq "$ORIG_PERIOD" ] && [ "$ABS_TRUE_ERROR" -lt 3500 ]; then
-            # Enter fine lock when safely inside the fundamental +/- 4000ps window (using 3500ps buffer)
+            # Enter fine lock when safely inside the window. Speed up averaging by 10x.
             psCLK_OUTperiod=$FINE_PERIOD
             psCLK_OUTperiodHalf=$FINE_HALF
+            N=$FINE_N
+            TRIM_COUNT=$FINE_TRIM
             if [ "$PlotInfo" = "true" ]; then
-                echo ">>> FINE LOCK TRIGGERED: True error ($ABS_TRUE_ERROR ps) is < 3500 ps. Switching to fine lock ($FINE_PERIOD ps). <<<"
+                echo ">>> FINE LOCK TRIGGERED: True error ($ABS_TRUE_ERROR ps) is < 3500 ps. Switching to FINE lock ($FINE_PERIOD ps, N=$N). <<<"
             fi
         fi
 
@@ -213,9 +223,9 @@ while true; do
             echo "Total calculated step: $CORRECTIONscaled ps"
             
             if [ "$psCLK_OUTperiod" -eq "$FINE_PERIOD" ]; then
-                echo "Controller State: FINE LOCK ($FINE_PERIOD ps period)"
+                echo "Controller State: FINE LOCK ($FINE_PERIOD ps period, N=$N)"
             else
-                echo "Controller State: MACRO LOCK ($ORIG_PERIOD ps period)"
+                echo "Controller State: MACRO LOCK ($ORIG_PERIOD ps period, N=$N)"
             fi
         fi
 
