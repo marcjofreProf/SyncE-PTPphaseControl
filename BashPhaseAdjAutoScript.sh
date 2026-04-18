@@ -23,18 +23,23 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=50                # Number of samples to collect per interval
+N=15                # Number of samples to collect per interval
 TRIM_COUNT=4        # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
-psCLK_OUTperiod=$(( 4000 * 10 ))      # Initial Period of the CLK_OUT signal in picoseconds
-psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
+
+# Original Macro Period Constraints
+ORIG_PERIOD=$(( 4000 * 10 ))          # 40,000 ps
+ORIG_HALF=$(( ORIG_PERIOD / 2 ))      # 20,000 ps
+
+# Active Controller Constraints (Starts in Macro-Lock)
+psCLK_OUTperiod=$ORIG_PERIOD
+psCLK_OUTperiodHalf=$ORIG_HALF
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
-scaled_PIDp=600             # Proportional gain (0.60)
-scaled_PIDi=15              # Integral gain (0.015) - Keep this low!
+scaled_PIDp=600             # Proportional gain (0.60) - Pulls aggressively to 0
+scaled_PIDi=15              # Integral gain (0.015) - Corrects static drift
 
 # --- Initialize Persistent Memory ---
-# Because the script stays alive, this variable simply persists in RAM!
 INTEGRAL_ACCUM=0
 
 if [ "$INTERVAL" -gt 0 ]; then
@@ -48,10 +53,7 @@ fi
 # ==========================================
 while true; do
 
-    # Clear the terminal at the start of each new interval
     clear
-
-    # --- Runtime Variables for this run ---
     UNWRAPPED_SAMPLES=()
     VALID_SAMPLES=0
     wrap_offset=0
@@ -60,7 +62,6 @@ while true; do
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
     do
-        # 1. Clear the kernel ring buffer so we don't read stale data
         sudo dmesg -c > /dev/null
         
         sleep 0.20
@@ -69,7 +70,6 @@ while true; do
 
         val=$(dmesg | grep "PHC_PHASE_RESULT:" | tail -1 | awk -F': ' '{print $NF}')
         
-        # Strict check: Is it non-empty AND a valid integer?
         if ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
             echo "Error: Invalid or missing offset from $INTERFACE at sample $i (Got: '$val')"
             continue
@@ -90,12 +90,10 @@ while true; do
             unwrapped_val=$(( val + wrap_offset ))
         fi
 
-        # Store the unwrapped value in our array
         UNWRAPPED_SAMPLES+=("$unwrapped_val")
         VALID_SAMPLES=$(( VALID_SAMPLES + 1 ))
     done
 
-    # Protect against total read failure
     if [ "$VALID_SAMPLES" -eq 0 ]; then
         echo "Error: No valid samples collected. Skipping this interval."
     else
@@ -103,7 +101,6 @@ while true; do
         # --- Trimmed Averaging Math ---
         # ==========================================
         if [ "$VALID_SAMPLES" -le $(( TRIM_COUNT * 2 )) ]; then
-            # Not enough samples to trim safely, fallback to a normal average
             echo "Warning: Not enough samples for trimmed average. Doing normal mean."
             TRIMMED_SUM=0
             for val in "${UNWRAPPED_SAMPLES[@]}"; do
@@ -111,76 +108,76 @@ while true; do
             done
             RAW_AVERAGE=$(( TRIMMED_SUM / VALID_SAMPLES ))
         else
-            # Sort the unwrapped array numerically
             SORTED=($(printf "%s\n" "${UNWRAPPED_SAMPLES[@]}" | sort -n))
-            
             TRIMMED_SUM=0
             TRIMMED_COUNT=0
-            
-            # Sum the values, skipping the first $TRIM_COUNT and last $TRIM_COUNT items
             for (( j=TRIM_COUNT; j<VALID_SAMPLES-TRIM_COUNT; j++ ))
             do
                 TRIMMED_SUM=$(( TRIMMED_SUM + SORTED[j] ))
                 TRIMMED_COUNT=$(( TRIMMED_COUNT + 1 ))
             done
-            
             RAW_AVERAGE=$(( TRIMMED_SUM / TRIMMED_COUNT ))
         fi
 
         # ==========================================
-        # --- PI-Controller Math (Shortest Path) ---
+        # --- Dynamic State Machine & Error Math ---
         # ==========================================
 
-        # 1. Calculate Signed Error (Inverted Logic: Process Variable - Setpoint)
-        ERROR=$(( RAW_AVERAGE - TARGET_OFFSET ))
+        # 1. Calculate Raw Signed Error
+        RAW_ERROR=$(( RAW_AVERAGE - TARGET_OFFSET ))
 
-        # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
-        # This fixes the circular wrap-around logic for the setpoint.
-        ERROR=$(( ERROR % psCLK_OUTperiod ))
+        # 2. Find TRUE absolute error relative to the original 40,000 ps macro-period
+        TRUE_ERROR=$(( RAW_ERROR % ORIG_PERIOD ))
+        if [ "$TRUE_ERROR" -gt "$ORIG_HALF" ]; then
+            TRUE_ERROR=$(( TRUE_ERROR - ORIG_PERIOD ))
+        elif [ "$TRUE_ERROR" -lt "-$ORIG_HALF" ]; then
+            TRUE_ERROR=$(( TRUE_ERROR + ORIG_PERIOD ))
+        fi
+        
+        ABS_TRUE_ERROR=${TRUE_ERROR#-}
+
+        # 3. Lock/Unlock Logic
+        if [ "$psCLK_OUTperiod" -eq 8000 ] && [ "$ABS_TRUE_ERROR" -gt 8000 ]; then
+            # We were in fine lock, but drifted too far! Revert to macro period.
+            psCLK_OUTperiod=$ORIG_PERIOD
+            psCLK_OUTperiodHalf=$ORIG_HALF
+            if [ "$PlotInfo" = "true" ]; then
+                echo "!!! LOSS OF LOCK: True error ($ABS_TRUE_ERROR ps) exceeded 8000 ps. Reverting to macro period ($ORIG_PERIOD ps). !!!"
+            fi
+        elif [ "$psCLK_OUTperiod" -eq "$ORIG_PERIOD" ] && [ "$ABS_TRUE_ERROR" -lt 8000 ]; then
+            # We got close enough! Switch to fine lock to ignore hardware jumps.
+            psCLK_OUTperiod=8000
+            psCLK_OUTperiodHalf=4000
+            if [ "$PlotInfo" = "true" ]; then
+                echo ">>> FINE LOCK TRIGGERED: True error ($ABS_TRUE_ERROR ps) is < 8000 ps. Switching to fine lock (8000 ps). <<<"
+            fi
+        fi
+
+        # 4. Normalize Error for the Controller using the ACTIVE period
+        ERROR=$(( RAW_ERROR % psCLK_OUTperiod ))
         if [ "$ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
             ERROR=$(( ERROR - psCLK_OUTperiod ))
         elif [ "$ERROR" -lt "-$psCLK_OUTperiodHalf" ]; then
             ERROR=$(( ERROR + psCLK_OUTperiod ))
         fi
 
-        # --- DYNAMIC PERIOD ADJUSTMENT (FINE LOCK) ---
-        ABS_ERROR=${ERROR#-} # Strip minus sign for absolute value
-        
-        if [ "$ABS_ERROR" -lt 8000 ] && [ "$psCLK_OUTperiod" -ne 8000 ]; then
-            psCLK_OUTperiod=8000
-            psCLK_OUTperiodHalf=4000
-            
-            # Re-normalize error against the newly clamped period bounds
-            ERROR=$(( ERROR % psCLK_OUTperiod ))
-            if [ "$ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
-                ERROR=$(( ERROR - psCLK_OUTperiod ))
-            elif [ "$ERROR" -lt "-$psCLK_OUTperiodHalf" ]; then
-                ERROR=$(( ERROR + psCLK_OUTperiod ))
-            fi
-            
-            if [ "$PlotInfo" = "true" ]; then
-                echo ">>> FINE LOCK TRIGGERED: Error ($ABS_ERROR ps) < 8000 ps. psCLK_OUTperiod transformed to 8000 ps. <<<"
-            fi
-        fi
+        # ==========================================
+        # --- PI Controller ---
+        # ==========================================
 
-        # 3. Add Error to Integral Accumulator
         INTEGRAL_ACCUM=$(( INTEGRAL_ACCUM + ERROR ))
 
-        # 4. Anti-Windup (Cap the integral accumulator at ± half period)
         if [ "$INTEGRAL_ACCUM" -gt "$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=$psCLK_OUTperiodHalf
         elif [ "$INTEGRAL_ACCUM" -lt "-$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=-$psCLK_OUTperiodHalf
         fi
 
-        # 5. Calculate P and I terms
         P_TERM=$(( (scaled_PIDp * ERROR) / scaled_PID_factor ))
         I_TERM=$(( (scaled_PIDi * INTEGRAL_ACCUM) / scaled_PID_factor ))
 
         CORRECTIONscaled=$(( P_TERM + I_TERM ))
 
-        # 6. Final Phase Output Wrap (Shortest Path logic for execution)
-        # Prevents stepping by e.g. +80ns when -20ns achieves the exact same phase.
         CORRECTIONscaled=$(( CORRECTIONscaled % psCLK_OUTperiod ))
         if [ "$CORRECTIONscaled" -gt "$psCLK_OUTperiodHalf" ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled - psCLK_OUTperiod ))
@@ -194,39 +191,27 @@ while true; do
 
         ABS_CORRECTION=${CORRECTIONscaled#-}
 
-        # Force a large correction
-        # ABS_CORRECTION=$((ABS_CORRECTION+psCLK_OUTperiod))
-
-        # Check if ptp4l is currently running. Somehow it is a bad behavior that when ptp4l running, the phase aligment procedure needs sort of the following (why 10? TODO)
-        # Commented because done in the DP83640 driver
-        #if pgrep "ptp4l" > /dev/null; then
-        #    # If it is running, multiply the correction by 10
-        #    ABS_CORRECTION=$((ABS_CORRECTION * 10))
-        #    echo "ptp4l running, applying a multiplication factor"
-        #fi
-
         if [[ "$CORRECTIONscaled" == -* ]]; then
             SIGN="-"
         else
             SIGN=""
         fi
 
-        # Format picoseconds into fractional seconds
         CORRECTION=$(printf -- "%s0.%012d" "$SIGN" "$ABS_CORRECTION")
 
         if [ "$PlotInfo" = "true" ]; then
             echo "--- PID DIAGNOSTICS ---"
-            if [ "$VALID_SAMPLES" -gt $(( TRIM_COUNT * 2 )) ]; then
-                echo "Trimmed out $TRIM_COUNT high/low samples. Averaged middle $TRIMMED_COUNT."
-            fi
             echo "Measured Raw Avg: $RAW_AVERAGE ps"
-            if [ "$TARGET_OFFSET" -ne 0 ]; then
-                echo "Target Offset: $TARGET_OFFSET ps"
-            fi
-            echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
+            echo "True Physical Error: $TRUE_ERROR ps"
+            echo "Active Controller Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
             echo "Applying P-Term: $P_TERM ps | I-Term: $I_TERM ps"
             echo "Total calculated step: $CORRECTIONscaled ps"
-            echo "Current Reference Clock Period: $psCLK_OUTperiod ps"
+            
+            if [ "$psCLK_OUTperiod" -eq 8000 ]; then
+                echo "Controller State: FINE LOCK (8000 ps period)"
+            else
+                echo "Controller State: MACRO LOCK ($ORIG_PERIOD ps period)"
+            fi
         fi
 
         sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
@@ -234,7 +219,7 @@ while true; do
 
     # --- Loop Control ---
     if [ "$INTERVAL" -eq 0 ]; then
-        break # Exit the loop immediately if running in single-shot mode
+        break
     fi
 
     if [ "$PlotInfo" = "true" ]; then
