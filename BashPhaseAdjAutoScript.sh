@@ -25,13 +25,13 @@ PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
 N=50                # Number of samples to collect per interval
 TRIM_COUNT=4        # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
-psCLK_OUTperiod=$(( 4000 * 10 ))      # Initial Period of the CLK_OUT signal in picoseconds
+psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- PI Controller Tuning ---
-scaled_PID_factor=1000      # Scaling value to operate with integers
-scaled_PIDp=600             # Proportional gain (0.60)
-scaled_PIDi=15              # Integral gain (0.015) - Keep this low!
+scaled_PID_factor=100      # Scaling value to operate with integers
+scaled_PIDp=15             # Proportional gain (0.25)
+scaled_PIDi=2              # Integral gain (0.02) - Keep this low!
 
 # --- Initialize Persistent Memory ---
 # Because the script stays alive, this variable simply persists in RAM!
@@ -143,26 +143,6 @@ while true; do
             ERROR=$(( ERROR + psCLK_OUTperiod ))
         fi
 
-        # --- DYNAMIC PERIOD ADJUSTMENT (FINE LOCK) ---
-        ABS_ERROR=${ERROR#-} # Strip minus sign for absolute value
-        
-        if [ "$ABS_ERROR" -lt 8000 ] && [ "$psCLK_OUTperiod" -ne 8000 ]; then
-            psCLK_OUTperiod=8000
-            psCLK_OUTperiodHalf=4000
-            
-            # Re-normalize error against the newly clamped period bounds
-            ERROR=$(( ERROR % psCLK_OUTperiod ))
-            if [ "$ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
-                ERROR=$(( ERROR - psCLK_OUTperiod ))
-            elif [ "$ERROR" -lt "-$psCLK_OUTperiodHalf" ]; then
-                ERROR=$(( ERROR + psCLK_OUTperiod ))
-            fi
-            
-            if [ "$PlotInfo" = "true" ]; then
-                echo ">>> FINE LOCK TRIGGERED: Error ($ABS_ERROR ps) < 8000 ps. psCLK_OUTperiod transformed to 8000 ps. <<<"
-            fi
-        fi
-
         # 3. Add Error to Integral Accumulator
         INTEGRAL_ACCUM=$(( INTEGRAL_ACCUM + ERROR ))
 
@@ -226,7 +206,6 @@ while true; do
             echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
             echo "Applying P-Term: $P_TERM ps | I-Term: $I_TERM ps"
             echo "Total calculated step: $CORRECTIONscaled ps"
-            echo "Current Reference Clock Period: $psCLK_OUTperiod ps"
         fi
 
         sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
