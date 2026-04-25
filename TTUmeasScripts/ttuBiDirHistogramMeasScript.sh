@@ -47,7 +47,7 @@ sleep 3
 # =========================================================
 OFFSET_PS=${1:-0} # Offset between the capturing channels
 TRIGGER_VOLTAGE=1.0 # Threshold voltage value for the channels
-DURATION_S=3600 # Duration in seconds of the measurement
+DURATION_S=1200 # Duration in seconds of the measurement
 BINWIDTH_PS=25
 N_BINS=1000
 DECIMATION_FACTOR=1 # Takes 1 out of every N points at the end before saving
