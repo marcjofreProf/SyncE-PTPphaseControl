@@ -31,7 +31,7 @@ psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
 scaled_PIDp=150             # Proportional gain (0.15)
-scaled_PIDi=90              # Integral gain (0.09)
+scaled_PIDi=120              # Integral gain (0.09)
 
 # --- Initialize Persistent Memory ---
 # Because the script stays alive, this variable simply persists in RAM!
