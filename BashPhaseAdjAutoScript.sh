@@ -63,9 +63,9 @@ while true; do
         # 1. Clear the kernel ring buffer so we don't read stale data
         sudo dmesg -c > /dev/null
         
-        sleep 0.20
+        sleep 2.0
         sudo phc_ctl $INTERFACE -- phaseadj 0 > /dev/null 2>&1
-        sleep 0.05
+        sleep 0.5
 
         val=$(dmesg | grep "PHC_PHASE_RESULT:" | tail -1 | awk -F': ' '{print $NF}')
         
