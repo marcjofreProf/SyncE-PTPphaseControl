@@ -2,8 +2,8 @@
 # Bash script to automatically execute the PI phase adjustment algorithm for SynE-PTP
 # Usage: 
 #   ./BashPhaseAdjAutoScript.sh             (Runs once, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 10          (Runs continuously, 15s interval, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 10 500      (Runs continuously, 15s interval, locks phase at +500 ps)
+#   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
 
 # --- CLI Arguments ---
 # 1. Interval Argument
@@ -23,10 +23,16 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=150                # Number of samples to collect per interval
+N=15                 # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 20 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
+
+# --- FPGA Hardware Offset Configuration ---
+AXI_PHASE_ADDR="0x43C00000"  # Base address of your AXI-Lite Phase Bridge
+PS_PER_TICK=208              # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
+PS_PER_TICK_factor=10        # Scaling value to operate with integers
+# Note: if your RX clock is AHEAD of TX, you may need to invert this by making PS_PER_TICK negative
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
@@ -53,6 +59,7 @@ while true; do
 
     # --- Runtime Variables for this run ---
     UNWRAPPED_SAMPLES=()
+    TICK_SAMPLES=()
     VALID_SAMPLES=0
     wrap_offset=0
     prev_val=""
@@ -92,6 +99,16 @@ while true; do
 
         # Store the unwrapped value in our array
         UNWRAPPED_SAMPLES+=("$unwrapped_val")
+
+        # --- Read Hardware Phase from FPGA during sample collection ---
+        AXI_RAW_HEX=$(sudo devmem $AXI_PHASE_ADDR 32 2>/dev/null)
+        if [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
+            curr_tick=$(printf "%d" "$AXI_RAW_HEX")
+        else
+            curr_tick=0
+        fi
+        TICK_SAMPLES+=("$curr_tick")
+
         VALID_SAMPLES=$(( VALID_SAMPLES + 1 ))
     done
 
@@ -106,33 +123,48 @@ while true; do
             # Not enough samples to trim safely, fallback to a normal average
             echo "Warning: Not enough samples for trimmed average. Doing normal mean."
             TRIMMED_SUM=0
+            TRIMMED_TICK_SUM=0
             for val in "${UNWRAPPED_SAMPLES[@]}"; do
                 TRIMMED_SUM=$(( TRIMMED_SUM + val ))
             done
+            for t_val in "${TICK_SAMPLES[@]}"; do
+                TRIMMED_TICK_SUM=$(( TRIMMED_TICK_SUM + t_val ))
+            done
             RAW_AVERAGE=$(( TRIMMED_SUM / VALID_SAMPLES ))
+            AXI_TICKS=$(( TRIMMED_TICK_SUM / VALID_SAMPLES ))
         else
-            # Sort the unwrapped array numerically
+            # Sort the unwrapped array and tick array numerically
             SORTED=($(printf "%s\n" "${UNWRAPPED_SAMPLES[@]}" | sort -n))
+            SORTED_TICKS=($(printf "%s\n" "${TICK_SAMPLES[@]}" | sort -n))
             
             TRIMMED_SUM=0
+            TRIMMED_TICK_SUM=0
             TRIMMED_COUNT=0
             
             # Sum the values, skipping the first $TRIM_COUNT and last $TRIM_COUNT items
             for (( j=TRIM_COUNT; j<VALID_SAMPLES-TRIM_COUNT; j++ ))
             do
                 TRIMMED_SUM=$(( TRIMMED_SUM + SORTED[j] ))
+                TRIMMED_TICK_SUM=$(( TRIMMED_TICK_SUM + SORTED_TICKS[j] ))
                 TRIMMED_COUNT=$(( TRIMMED_COUNT + 1 ))
             done
             
             RAW_AVERAGE=$(( TRIMMED_SUM / TRIMMED_COUNT ))
+            AXI_TICKS=$(( TRIMMED_TICK_SUM / TRIMMED_COUNT ))
         fi
+
+        # Calculate picoseconds from the final averaged hardware ticks
+        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
+
+        # Combine software measurement with hardware offset
+        COMPENSATED_PHASE=$(( RAW_AVERAGE + AXI_OFFSET_PS ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
 
-        # 1. Calculate Signed Error (Inverted Logic: Process Variable - Setpoint)
-        ERROR=$(( RAW_AVERAGE - TARGET_OFFSET ))
+        # 1. Calculate Signed Error using the COMPENSATED phase
+        ERROR=$(( COMPENSATED_PHASE - TARGET_OFFSET ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
@@ -174,17 +206,6 @@ while true; do
 
         ABS_CORRECTION=${CORRECTIONscaled#-}
 
-        # Force a large correction
-        # ABS_CORRECTION=$((ABS_CORRECTION+psCLK_OUTperiod))
-
-        # Check if ptp4l is currently running. Somehow it is a bad behavior that when ptp4l running, the phase aligment procedure needs sort of the following (why 10? TODO)
-        # Commented because done in the DP83640 driver
-        #if pgrep "ptp4l" > /dev/null; then
-        #    # If it is running, multiply the correction by 10
-        #    ABS_CORRECTION=$((ABS_CORRECTION * 10))
-        #    echo "ptp4l running, applying a multiplication factor"
-        #fi
-
         if [[ "$CORRECTIONscaled" == -* ]]; then
             SIGN=""
         else
@@ -199,10 +220,14 @@ while true; do
             if [ "$VALID_SAMPLES" -gt $(( TRIM_COUNT * 2 )) ]; then
                 echo "Trimmed out $TRIM_COUNT high/low samples. Averaged middle $TRIMMED_COUNT."
             fi
-            echo "Measured Raw Avg: $RAW_AVERAGE ps"
+            echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
+            echo "Hardware Phase (FPGA):   $AXI_TICKS ticks -> $AXI_OFFSET_PS ps"
+            echo "Total Compensated Phase: $COMPENSATED_PHASE ps"
+            
             if [ "$TARGET_OFFSET" -ne 0 ]; then
-                echo "Target Offset: $TARGET_OFFSET ps"
+                echo "Target Setpoint Offset:  $TARGET_OFFSET ps"
             fi
+            echo "-----------------------"
             echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
             echo "Applying P-Term: $P_TERM ps | I-Term: $I_TERM ps"
             echo "Total calculated step: $CORRECTIONscaled ps"
@@ -218,7 +243,7 @@ while true; do
 
     if [ "$PlotInfo" = "true" ]; then
         echo "Sleeping for $INTERVAL seconds..."
-        echo "-----------------------"
+        echo "======================="
     fi
     sleep "$INTERVAL"
 
