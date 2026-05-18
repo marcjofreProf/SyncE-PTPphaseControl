@@ -30,7 +30,7 @@ psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- FPGA Hardware Offset Configuration with respect 25 MHz---
 AXI_PHASE_ADDR="0x43C00000"  # Base address of your AXI-Lite Phase Bridge
-PS_PER_TICK=26              # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
+PS_PER_TICK=104              # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
 PS_PER_TICK_factor=10        # Scaling value to operate with integers
 # Note: if your RX clock is AHEAD of TX, you may need to invert this by making PS_PER_TICK negative
 
