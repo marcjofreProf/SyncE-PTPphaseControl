@@ -5,6 +5,11 @@
 #   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
 #   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
 
+# Note: Still, since the internal DP83640 PHY PTP clock is actually of 8 ns, everynow and then it can fall one phase out of the true center.
+#       This has to do with each specify PHY internal compensation in dp83640.c driver: correction = (((3 * reference_clock_period) + 11) * 1000).
+#       Hence, a sort of calibration or manual compensation could be required.
+#       Or, the CLK_OUT signal should be introduced in IP block to measure this offset.
+
 # --- CLI Arguments ---
 # 1. Interval Argument
 INTERVAL=${1:-0}
