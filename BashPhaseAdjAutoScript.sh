@@ -28,7 +28,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=25                # Number of samples to collect per interval
+N=250                # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 20 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -161,7 +161,7 @@ while true; do
         # Combine software measurement with hardware offset
         COMPENSATED_PHASE=$(( RAW_AVERAGE))
 
-        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
+        AXI_OFFSET_PS=$(( - AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
