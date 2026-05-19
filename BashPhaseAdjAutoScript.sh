@@ -28,14 +28,14 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=250                # Number of samples to collect per interval
+N=25                # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 20 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- FPGA Hardware Offset Configuration with respect 25 MHz---
 AXI_PHASE_ADDR="0x43C00000"  # Base address of your AXI-Lite Phase Bridge
-PS_PER_TICK=52               # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
+PS_PER_TICK=208               # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
 PS_PER_TICK_factor=10        # Scaling value to operate with integers
 # Note: if your RX clock is AHEAD of TX, you may need to invert this by making PS_PER_TICK negative
 
@@ -161,14 +161,7 @@ while true; do
         # Combine software measurement with hardware offset
         COMPENSATED_PHASE=$(( RAW_AVERAGE))
 
-        RAW_AVERAGE=$(( RAW_AVERAGE % psCLK_OUTperiod ))
-
-        # Calculate picoseconds from the final averaged hardware ticks
-        if [ "$RAW_AVERAGE" -gt "$psCLK_OUTperiodHalf" ]; then
-            AXI_OFFSET_PS=$(( - AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
-        elif [ "$RAW_AVERAGE" -lt "$psCLK_OUTperiodHalf" ]; then
-            AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
-        fi
+        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
