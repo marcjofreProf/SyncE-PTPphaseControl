@@ -5,7 +5,7 @@
 #   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
 #   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
 
-# Note: Still, since the internal DP83640 PHY PTP clock is actually of 8 ns, everynow and then it can fall one phase out of the true center.
+# Note: Still, since the internal DP83640 PHY PTP clock is actually of 8 ns, everynow and then it can fall one cycle (or half cycle) out of the true center.
 #       This has to do with each specify PHY internal compensation in dp83640.c driver: correction = (((3 * reference_clock_period) + 11) * 1000).
 #       Hence, a sort of calibration or manual compensation could be required.
 #       Or, the CLK_OUT signal should be introduced in IP block to measure this offset.
@@ -28,7 +28,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=250                # Number of samples to collect per interval
+N=75                # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 20 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
