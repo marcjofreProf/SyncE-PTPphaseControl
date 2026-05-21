@@ -107,11 +107,22 @@ while true; do
 
         # --- Read Hardware Phase from FPGA during sample collection ---
         AXI_RAW_HEX=$(sudo devmem $AXI_PHASE_ADDR 32 2>/dev/null)
+
         if [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
-            curr_tick=$(printf "%d" "$AXI_RAW_HEX")
+            # 1. Convert hex to unsigned decimal
+            unsigned_val=$(printf "%d" "$AXI_RAW_HEX")
+            
+            # 2. Convert unsigned 32-bit to signed 32-bit
+            # If the value is >= 0x80000000 (2147483648), it is negative
+            if [ "$unsigned_val" -ge 2147483648 ]; then
+                curr_tick=$(( unsigned_val - 4294967296 ))
+            else
+                curr_tick=$unsigned_val
+            fi
         else
             curr_tick=0
         fi
+
         TICK_SAMPLES+=("$curr_tick")
 
         VALID_SAMPLES=$(( VALID_SAMPLES + 1 ))
