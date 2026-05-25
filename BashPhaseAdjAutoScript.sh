@@ -172,7 +172,7 @@ while true; do
         # Combine software measurement with hardware offset
         COMPENSATED_PHASE=$(( RAW_AVERAGE))
 
-        AXI_OFFSET_PS=$(( - AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
+        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
