@@ -30,7 +30,7 @@ PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
 N=250                # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
-psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds
+psCLK_OUTperiod=$(( 4000 * 2 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- FPGA Hardware Offset Configuration with respect 25 MHz---
@@ -179,7 +179,7 @@ while true; do
         # ==========================================
 
         # 1. Calculate Signed Error using the COMPENSATED phase
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + AXI_OFFSET_PS) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - AXI_OFFSET_PS) ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
