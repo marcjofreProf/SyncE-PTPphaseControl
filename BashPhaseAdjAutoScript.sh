@@ -28,15 +28,15 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=250                # Number of samples to collect per interval
+N=75                 # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
-psCLK_OUTperiod=$(( 4000 * 2 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
+psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
-# --- FPGA Hardware Offset Configuration with respect 25 MHz---
+# --- FPGA Hardware Offset Configuration with respect 25 MHz--- it is performing RX - TX. If the output is a positive number (e.g., 16 ticks), it means the RX phase event occurred 16 helper-clock cycles after the TX phase event.
 AXI_PHASE_ADDR="0x43C00000"  # Base address of your AXI-Lite Phase Bridge
-PS_PER_TICK=208               # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
-PS_PER_TICK_factor=10        # Scaling value to operate with integers
+PS_PER_TICK=2081             # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
+PS_PER_TICK_factor=100       # Scaling value to operate with integers
 # Note: if your RX clock is AHEAD of TX, you may need to invert this by making PS_PER_TICK negative
 
 # --- PI Controller Tuning ---
@@ -66,8 +66,7 @@ while true; do
     UNWRAPPED_SAMPLES=()
     TICK_SAMPLES=()
     VALID_SAMPLES=0
-    wrap_offset=0
-    prev_val=""
+    base_val="" # Reference baseline for this batch
 
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
@@ -87,19 +86,19 @@ while true; do
             continue
         fi
 
-        # Sequential Phase Unwrapping
+        # Robust Reference-Based Phase Unwrapping (Immune to noise latching)
         if [ "$VALID_SAMPLES" -eq 0 ]; then
-            prev_val=$val
+            base_val=$val
             unwrapped_val=$val
         else
-            diff=$(( val - prev_val ))
+            diff=$(( val - base_val ))
             if [ "$diff" -lt "-$psCLK_OUTperiodHalf" ]; then
-                wrap_offset=$(( wrap_offset + psCLK_OUTperiod ))
+                unwrapped_val=$(( val + psCLK_OUTperiod ))
             elif [ "$diff" -gt "$psCLK_OUTperiodHalf" ]; then
-                wrap_offset=$(( wrap_offset - psCLK_OUTperiod ))
+                unwrapped_val=$(( val - psCLK_OUTperiod ))
+            else
+                unwrapped_val=$val
             fi
-            prev_val=$val
-            unwrapped_val=$(( val + wrap_offset ))
         fi
 
         # Store the unwrapped value in our array
@@ -178,7 +177,7 @@ while true; do
         # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
 
-        # 1. Calculate Signed Error using the COMPENSATED phase
+        # 1. Calculate Signed Error using the COMPENSATED phase (Left sign as originally requested)
         ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - AXI_OFFSET_PS) ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
