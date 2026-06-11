@@ -34,6 +34,7 @@ psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseco
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- FPGA Hardware Offset Configuration with respect 25 MHz--- it is performing RX - TX. If the output is a positive number (e.g., 16 ticks), it means the RX phase event occurred 16 helper-clock cycles after the TX phase event.
+# This computed Rx to Tx offset is a direct delta (it is not a round-trip time related measurement).
 AXI_PHASE_ADDR="0x43C00000"  # Base address of your AXI-Lite Phase Bridge
 PS_PER_TICK=2081             # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
 PS_PER_TICK_factor=100       # Scaling value to operate with integers
@@ -178,7 +179,7 @@ while true; do
         # ==========================================
 
         # 1. Calculate Signed Error using the COMPENSATED phase (Left sign as originally requested)
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - AXI_OFFSET_PS) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - AXI_OFFSET_PS ) ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
