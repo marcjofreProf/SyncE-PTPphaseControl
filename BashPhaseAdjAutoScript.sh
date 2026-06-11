@@ -67,7 +67,6 @@ while true; do
     UNWRAPPED_SAMPLES=()
     TICK_SAMPLES=()
     VALID_SAMPLES=0
-    base_val="" # Reference baseline for this batch
 
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
@@ -87,23 +86,8 @@ while true; do
             continue
         fi
 
-        # Robust Reference-Based Phase Unwrapping (Immune to noise latching)
-        if [ "$VALID_SAMPLES" -eq 0 ]; then
-            base_val=$val
-            unwrapped_val=$val
-        else
-            diff=$(( val - base_val ))
-            if [ "$diff" -lt "-$psCLK_OUTperiodHalf" ]; then
-                unwrapped_val=$(( val + psCLK_OUTperiod ))
-            elif [ "$diff" -gt "$psCLK_OUTperiodHalf" ]; then
-                unwrapped_val=$(( val - psCLK_OUTperiod ))
-            else
-                unwrapped_val=$val
-            fi
-        fi
-
         # Store the unwrapped value in our array
-        UNWRAPPED_SAMPLES+=("$unwrapped_val")
+        UNWRAPPED_SAMPLES+=("$val")
 
         # --- Read Hardware Phase from FPGA during sample collection ---
         AXI_RAW_HEX=$(sudo devmem $AXI_PHASE_ADDR 32 2>/dev/null)
