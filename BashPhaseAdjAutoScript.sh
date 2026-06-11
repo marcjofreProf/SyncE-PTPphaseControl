@@ -28,7 +28,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=75                 # Number of samples to collect per interval
+N=15                 # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -84,6 +84,13 @@ while true; do
         if ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
             echo "Error: Invalid or missing offset from $INTERFACE at sample $i (Got: '$val')"
             continue
+        fi
+
+        val=$(( val % psCLK_OUTperiod ))
+        if [ "$val" -gt "$psCLK_OUTperiodHalf" ]; then
+            val=$(( val - psCLK_OUTperiod ))
+        elif [ "$val" -le -$psCLK_OUTperiodHalf ]; then
+            val=$(( val + psCLK_OUTperiod ))
         fi
 
         # Store the unwrapped value in our array
@@ -163,15 +170,15 @@ while true; do
         # ==========================================
 
         # 1. Calculate Signed Error using the COMPENSATED phase (Left sign as originally requested)
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + AXI_OFFSET_PS ) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + 0 * AXI_OFFSET_PS ) ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
         ERROR=$(( ERROR % psCLK_OUTperiod ))
-        if [ "$ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
-            ERROR=$(( ERROR - psCLK_OUTperiod ))
-        elif [ "$ERROR" -lt "-$psCLK_OUTperiodHalf" ]; then
+        if [ "$ERROR" -le -$psCLK_OUTperiodHalf ]; then
             ERROR=$(( ERROR + psCLK_OUTperiod ))
+        elif [ "$ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
+            ERROR=$(( ERROR - psCLK_OUTperiod ))
         fi
 
         # 3. Add Error to Integral Accumulator
@@ -193,10 +200,10 @@ while true; do
         # 6. Final Phase Output Wrap (Shortest Path logic for execution)
         # Prevents stepping by e.g. +80ns when -20ns achieves the exact same phase.
         CORRECTIONscaled=$(( CORRECTIONscaled % psCLK_OUTperiod ))
-        if [ "$CORRECTIONscaled" -gt "$psCLK_OUTperiodHalf" ]; then
-            CORRECTIONscaled=$(( CORRECTIONscaled - psCLK_OUTperiod ))
-        elif [ "$CORRECTIONscaled" -lt "-$psCLK_OUTperiodHalf" ]; then
+        if [ "$CORRECTIONscaled" -le -$psCLK_OUTperiodHalf ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled + psCLK_OUTperiod ))
+        elif [ "$CORRECTIONscaled" -gt "$psCLK_OUTperiodHalf" ]; then
+            CORRECTIONscaled=$(( CORRECTIONscaled - psCLK_OUTperiod ))
         fi
 
         # ==========================================
