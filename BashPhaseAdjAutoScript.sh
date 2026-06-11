@@ -179,7 +179,7 @@ while true; do
         # ==========================================
 
         # 1. Calculate Signed Error using the COMPENSATED phase (Left sign as originally requested)
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - AXI_OFFSET_PS ) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + AXI_OFFSET_PS ) ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
