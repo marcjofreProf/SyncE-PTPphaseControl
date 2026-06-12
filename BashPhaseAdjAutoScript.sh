@@ -163,14 +163,15 @@ while true; do
         # Combine software measurement with hardware offset
         COMPENSATED_PHASE=$(( RAW_AVERAGE))
 
-        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))        
+        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))       
+        AXI_OFFSET_PS=$(( ( AXI_OFFSET_PS % 16000 ) - 8000 ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
 
         # 1. Calculate Signed Error using the COMPENSATED phase (Left sign as originally requested)
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + EXTRA_TARGET_OFFSET + 0 * AXI_OFFSET_PS ) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - AXI_OFFSET_PS ) ))
 
         # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
