@@ -25,8 +25,6 @@ if ! [[ "$TARGET_OFFSET" =~ ^-?[0-9]+$ ]]; then
     exit 1
 fi
 
-LAST_EXTRA_TARGET_OFFSET=""
-
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
@@ -165,62 +163,7 @@ while true; do
         # Combine software measurement with hardware offset
         COMPENSATED_PHASE=$(( RAW_AVERAGE))
 
-        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
-
-        # ==============================================================================
-        # --- Dynamic Offset Shift Adjustment ---
-        # ==============================================================================
-        if [ "$AXI_OFFSET_PS" -gt "$psCLK_OUTperiodHalf" ]; then
-            EXTRA_TARGET_OFFSET=$psCLK_OUTperiodHalf
-        else
-            EXTRA_TARGET_OFFSET=0
-        fi
-        
-        # State Change Detection: Notify if the offset flipped compared to the last loop run
-        if [ -n "$LAST_EXTRA_TARGET_OFFSET" ] && [ "$EXTRA_TARGET_OFFSET" -ne "$LAST_EXTRA_TARGET_OFFSET" ]; then
-            echo " [NOTICE] EXTRA_TARGET_OFFSET dynamically changed from ${LAST_EXTRA_TARGET_OFFSET} ps to ${EXTRA_TARGET_OFFSET} ps"
-        fi
-         
-        # Save the current value for comparison in the next iteration
-        LAST_EXTRA_TARGET_OFFSET=$EXTRA_TARGET_OFFSET
-
-        # ==============================================================================
-        # --- Update ptp4l.conf Egress Latency (Flash-Safe) ---
-        # Convert picoseconds to integer nanoseconds and update the configuration file.
-        # ==============================================================================
-        #AXI_OFFSET_NS=$(( AXI_OFFSET_PS / 1000 ))
-        #PTP4L_CONF="/etc/linuxptp/ptp4l.conf"
-        #
-        #if [ -f "$PTP4L_CONF" ]; then
-        #    # Read the current value from the file to avoid redundant write cycles
-        #    CURRENT_EGRESS=$(grep "^[[:space:]]*egressLatency" "$PTP4L_CONF" | head -n 1 | awk '{print $2}')
-        #    
-        #    if [ "$CURRENT_EGRESS" != "$AXI_OFFSET_NS" ]; then
-        #        if [ -n "$CURRENT_EGRESS" ]; then
-        #            # Parameter exists and value changed: update it inline
-        #            sudo sed -i "s/^[[:space:]]*egressLatency.*/egressLatency $AXI_OFFSET_NS/" "$PTP4L_CONF"
-        #        else
-        #            # Parameter doesn't exist yet: insert it under the [global] section header
-        #            if grep -q "^\[global\]" "$PTP4L_CONF"; then
-        #                sudo sed -i "/^\[global\]/a egressLatency $AXI_OFFSET_NS" "$PTP4L_CONF"
-        #            else
-        #                # Fallback if no global header is found
-        #                echo "egressLatency $AXI_OFFSET_NS" | sudo tee -a "$PTP4L_CONF" > /dev/null
-        #            fi
-        #        fi
-        #        
-        #        if [ "$PlotInfo" = "true" ]; then
-        #            echo "Config Updated: egressLatency changed from '${CURRENT_EGRESS:-None}' to '${AXI_OFFSET_NS}' ns"
-        #        fi
-        #        
-        #        # OPTIONAL: Un-comment the line below if you want to force ptp4l to pick up 
-        #        # the configuration change dynamically by restarting the daemon:
-        #        # sudo killall ptp4l 2>/dev/null
-        #    fi
-        #else
-        #    echo "Warning: Configuration file $PTP4L_CONF not found."
-        #fi
-        # ==============================================================================
+        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))        
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
