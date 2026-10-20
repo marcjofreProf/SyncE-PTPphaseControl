@@ -35,9 +35,15 @@ psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
 # --- FPGA Hardware Offset Configuration with respect 25 MHz--- it is performing RX - TX. If the output is a positive number (e.g., 16 ticks), it means the RX phase event occurred 16 helper-clock cycles after the TX phase event.
 # This computed Rx to Tx offset is a direct delta (it is not a round-trip time related measurement).
-AXI_PHASE_ADDR="0x43C00000"  # Base address of your AXI-Lite Phase Bridge
-PS_PER_TICK=2081             # Picoseconds per tick (Resolution based on 24.987MHz helper clock)
-PS_PER_TICK_factor=100       # Scaling value to operate with integers
+AXI_PHASE_ADDR="0x43C00000"  # Base address
+AXI_PPS_TS_ADDR="0x43C00004" # PPS Timestamp
+AXI_CLKOUT_TS_ADDR="0x43C00008" # CLKOUT Timestamp
+AXI_VALID_ADDR="0x43C0000C"  # Validity flags
+
+PS_PER_TICK=40020            # 1 / 24.987 MHz = 40.02 ns = 40020 ps
+PS_PER_TICK_factor=1         # We don't need scaling anymore since the math fits in 64-bit integers
+M3_FILTER_N=10               # Slow filter for the PPS/CLK_OUT difference
+M3_FILTERED=0
 # Note: if your RX clock is AHEAD of TX, you may need to invert this by making PS_PER_TICK negative
 
 # --- PI Controller Tuning ---
@@ -67,6 +73,7 @@ while true; do
     UNWRAPPED_SAMPLES=()
     TICK_SAMPLES=()
     VALID_SAMPLES=0
+    M3_RAW_PS=0
 
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
@@ -78,7 +85,7 @@ while true; do
         sudo phc_ctl $INTERFACE -- phaseadj 0 > /dev/null 2>&1
         sleep 0.20
 
-        val=$(dmesg | grep "PHC_PHASE_RESULT:" | tail -1 | awk -F': ' '{print $NF}')
+        val=$(dmesg | grep "PHC_PHASE_CLKOUT_PS:" | tail -1 | awk -F': ' '{print $NF}')
         
         # Strict check: Is it non-empty AND a valid integer?
         if ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
@@ -98,6 +105,18 @@ while true; do
 
         # --- Read Hardware Phase from FPGA during sample collection ---
         AXI_RAW_HEX=$(sudo devmem $AXI_PHASE_ADDR 32 2>/dev/null)
+        
+        # --- Read PPS & CLKOUT Timestamps ---
+        PPS_HEX=$(sudo devmem $AXI_PPS_TS_ADDR 32 2>/dev/null)
+        CLK_HEX=$(sudo devmem $AXI_CLKOUT_TS_ADDR 32 2>/dev/null)
+        VALID_HEX=$(sudo devmem $AXI_VALID_ADDR 32 2>/dev/null)
+        
+        if [[ "$VALID_HEX" == "0x00000003" ]]; then
+            PPS_DEC=$(printf "%d" "$PPS_HEX")
+            CLK_DEC=$(printf "%d" "$CLK_HEX")
+            M3_RAW_TICKS=$(( CLK_DEC - PPS_DEC ))
+            M3_RAW_PS=$(( M3_RAW_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
+        fi
 
         if [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
             # 1. Convert hex to unsigned decimal
@@ -160,20 +179,33 @@ while true; do
             AXI_TICKS=$(( TRIMMED_TICK_SUM / TRIMMED_COUNT ))
         fi
 
-        # Combine software measurement with hardware offset
-        COMPENSATED_PHASE=$(( RAW_AVERAGE))
-
-        AXI_OFFSET_PS=$(( AXI_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))       
+        # --- DIAGNOSTIC ONLY: SyncE TX/RX ---
+        AXI_OFFSET_PS=$(( AXI_TICKS * 2081 / 100 ))
         AXI_OFFSET_PS=$(( ( AXI_OFFSET_PS % 16000 ) - 8000 ))
+        if [ "$PlotInfo" = "true" ]; then
+            echo "SyncE TX/RX (FPGA DDMTD): $AXI_TICKS ticks -> $AXI_OFFSET_PS ps (diagnostic)"
+        fi
+
+        # ==========================================
+        # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
+        # Update the filter ONCE per interval (not per sample).
+        # ==========================================
+        if [ "$M3_RAW_PS" -ne 0 ]; then
+            M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_RAW_PS) / M3_FILTER_N ))
+        fi
+
+        # ==========================================
+        # --- LOOP I: Error Calculation ---
+        # Target is corrected by the slow M3 filter
+        # ==========================================
+        COMPENSATED_PHASE=$(( RAW_AVERAGE ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
 
-        # 1. Calculate Signed Error using the COMPENSATED phase (Left sign as originally requested)
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - AXI_OFFSET_PS ) ))
-
-        # 2. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
+        # 1. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         # This fixes the circular wrap-around logic for the setpoint.
         ERROR=$(( ERROR % psCLK_OUTperiod ))
         if [ "$ERROR" -le -$psCLK_OUTperiodHalf ]; then
@@ -182,23 +214,23 @@ while true; do
             ERROR=$(( ERROR - psCLK_OUTperiod ))
         fi
 
-        # 3. Add Error to Integral Accumulator
+        # 2. Add Error to Integral Accumulator
         INTEGRAL_ACCUM=$(( INTEGRAL_ACCUM + ERROR ))
 
-        # 4. Anti-Windup (Cap the integral accumulator at ± half period)
+        # 3. Anti-Windup (Cap the integral accumulator at ± half period)
         if [ "$INTEGRAL_ACCUM" -gt "$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=$psCLK_OUTperiodHalf
         elif [ "$INTEGRAL_ACCUM" -lt "-$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=-$psCLK_OUTperiodHalf
         fi
 
-        # 5. Calculate P and I terms
+        # 4. Calculate P and I terms
         P_TERM=$(( (scaled_PIDp * ERROR) / scaled_PID_factor ))
         I_TERM=$(( (scaled_PIDi * INTEGRAL_ACCUM) / scaled_PID_factor ))
 
         CORRECTIONscaled=$(( P_TERM + I_TERM ))
 
-        # 6. Final Phase Output Wrap (Shortest Path logic for execution)
+        # 5. Final Phase Output Wrap (Shortest Path logic for execution)
         # Prevents stepping by e.g. +80ns when -20ns achieves the exact same phase.
         CORRECTIONscaled=$(( CORRECTIONscaled % psCLK_OUTperiod ))
         if [ "$CORRECTIONscaled" -le -$psCLK_OUTperiodHalf ]; then
@@ -228,7 +260,8 @@ while true; do
                 echo "Trimmed out $TRIM_COUNT high/low samples. Averaged middle $TRIMMED_COUNT."
             fi
             echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
-            echo "Hardware Phase (FPGA):   $AXI_TICKS ticks -> $AXI_OFFSET_PS ps"
+            echo "PPS vs CLK_OUT (M3):     $M3_RAW_PS ps (Filtered: $M3_FILTERED ps)"
+            echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_OFFSET_PS ps"
             
             if [ "$TARGET_OFFSET" -ne 0 ]; then
                 echo "Target Setpoint Offset:  $TARGET_OFFSET ps"
