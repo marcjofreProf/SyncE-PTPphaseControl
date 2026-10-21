@@ -28,7 +28,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=25                 # Number of samples to collect per interval
+N=2                 # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -111,11 +111,29 @@ while true; do
         CLK_HEX=$(sudo devmem $AXI_CLKOUT_TS_ADDR 32 2>/dev/null)
         VALID_HEX=$(sudo devmem $AXI_VALID_ADDR 32 2>/dev/null)
         
-        if [[ "$VALID_HEX" == "0x00000003" ]]; then
-            PPS_DEC=$(printf "%d" "$PPS_HEX")
-            CLK_DEC=$(printf "%d" "$CLK_HEX")
+        # Strip the "0x" and leading zeros to ensure the comparison is safe
+        VALID_CLEAN=$(echo "$VALID_HEX" | sed 's/0x//; s/^0*//')
+        
+        if [[ "$VALID_CLEAN" == "3" ]]; then
+            # Force Bash to read the hex as an unsigned 32-bit integer
+            PPS_DEC=$((16#${PPS_HEX#0x}))
+            CLK_DEC=$((16#${CLK_HEX#0x}))
+            
             M3_RAW_TICKS=$(( CLK_DEC - PPS_DEC ))
+            
+            # Handle wrap-around
+            if [ "$M3_RAW_TICKS" -lt 0 ]; then
+                M3_RAW_TICKS=$(( M3_RAW_TICKS + 4294967296 ))
+            fi
+            
+            # Handle wrap-around if the CLKOUT tick is slightly behind PPS
+            if [ "$M3_RAW_TICKS" -lt 0 ]; then
+                M3_RAW_TICKS=$(( M3_RAW_TICKS + 4294967296 ))
+            fi
+            
             M3_RAW_PS=$(( M3_RAW_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
+        else
+            M3_RAW_PS=0
         fi
 
         if [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
