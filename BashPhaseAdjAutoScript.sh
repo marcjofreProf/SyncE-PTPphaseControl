@@ -279,7 +279,7 @@ while true; do
             fi
             echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
             echo "PPS vs CLK_OUT (M3):     $M3_RAW_PS ps (Filtered: $M3_FILTERED ps)"
-            echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_OFFSET_PS ps"
+            echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_OFFSET_PS ps (diagnostic)"
             
             if [ "$TARGET_OFFSET" -ne 0 ]; then
                 echo "Target Setpoint Offset:  $TARGET_OFFSET ps"
