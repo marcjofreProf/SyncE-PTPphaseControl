@@ -202,7 +202,7 @@ while true; do
 
         # --- DIAGNOSTIC ONLY: SyncE TX/RX ---
         AXI_OFFSET_PS=$(( AXI_TICKS * 2081 / 100 ))
-        AXI_OFFSET_PS=$(( ( AXI_OFFSET_PS % 16000 ) - 8000 ))
+        AXI_OFFSET_PS=$(( ( AXI_OFFSET_PS % 8000 ) - 4000 ))
 
         # ==========================================
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
