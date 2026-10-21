@@ -28,7 +28,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=2                 # Number of samples to collect per interval
+N=75                 # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -121,17 +121,20 @@ while true; do
             
             M3_RAW_TICKS=$(( CLK_DEC - PPS_DEC ))
             
-            # Handle wrap-around
-            if [ "$M3_RAW_TICKS" -lt 0 ]; then
-                M3_RAW_TICKS=$(( M3_RAW_TICKS + 4294967296 ))
-            fi
-            
-            # Handle wrap-around if the CLKOUT tick is slightly behind PPS
+            # Handle wrap-around for the 32-bit counter
             if [ "$M3_RAW_TICKS" -lt 0 ]; then
                 M3_RAW_TICKS=$(( M3_RAW_TICKS + 4294967296 ))
             fi
             
             M3_RAW_PS=$(( M3_RAW_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
+            
+            # Wrap M3 to the CLK_OUT period (40 ns = 40000 ps)
+            M3_RAW_PS=$(( M3_RAW_PS % 40000 ))
+            
+            # If > 20 ns, treat as negative phase
+            if [ "$M3_RAW_PS" -gt 20000 ]; then
+                M3_RAW_PS=$(( M3_RAW_PS - 40000 ))
+            fi
         else
             M3_RAW_PS=0
         fi
