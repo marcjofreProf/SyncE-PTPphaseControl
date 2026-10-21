@@ -49,7 +49,7 @@ M3_FILTERED=0
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
 scaled_PIDp=700             # Proportional gain (0.700)
-scaled_PIDi=50              # Integral gain (0.125)
+scaled_PIDi=100             # Integral gain (0.250)
 
 # --- Initialize Persistent Memory ---
 # Because the script stays alive, this variable simply persists in RAM!
