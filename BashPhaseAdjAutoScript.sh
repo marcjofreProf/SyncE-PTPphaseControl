@@ -28,7 +28,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=75                 # Number of samples to collect per interval
+N=25                 # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -220,7 +220,7 @@ while true; do
         # Target is corrected by the slow M3 filter
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED - AXI_OFFSET_PS) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
