@@ -206,11 +206,24 @@ while true; do
 
         # ==========================================
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
-        # Lock the filter to the first valid measurement to prevent
-        # the half-cycle slip caused by the 25MHz vs 24.987MHz beat.
+        # Update the filter ONCE per interval.
+        # GLITCH REJECTION: Because of the 25MHz vs 24.987MHz beat,
+        # M3 can randomly jump by half a cycle (20 ns). If the jump
+        # is too large, we ignore the sample and keep the old value.
         # ==========================================
-        if [ "$M3_RAW_PS" -ne 0 ] && [ "$M3_FILTERED" -eq 0 ]; then
-            M3_FILTERED=$M3_RAW_PS
+        if [ "$M3_RAW_PS" -ne 0 ]; then
+            # Calculate the difference between the new raw value and the old filtered value
+            M3_DIFF=$(( M3_RAW_PS - M3_FILTERED ))
+            
+            # If the difference is larger than 10 ns (half of half-period), it's a glitch.
+            # Also handle the case where M3_FILTERED is still 0 (initial lock).
+            if [ "$M3_FILTERED" -eq 0 ] || [ "${M3_DIFF#-}" -lt 10000 ]; then
+                M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_RAW_PS) / M3_FILTER_N ))
+            else
+                # Glitch detected: M3_RAW_PS is jumping by ~20 ns. Ignore it.
+                # M3_FILTERED stays the same.
+                M3_FILTERED=$M3_FILTERED
+            fi
         fi
 
         # ==========================================
