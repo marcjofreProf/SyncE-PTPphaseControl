@@ -48,8 +48,8 @@ M3_FILTERED=0
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
-scaled_PIDp=250             # Proportional gain (0.100)
-scaled_PIDi=25              # Integral gain (0.025)
+scaled_PIDp=1000             # Proportional gain (0.400)
+scaled_PIDi=100              # Integral gain (0.1)
 
 # --- Initialize Persistent Memory ---
 # Because the script stays alive, this variable simply persists in RAM!
@@ -216,7 +216,7 @@ while true; do
         # --- LOOP I: Error Calculation ---
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        # ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED + AXI_OFFSET_PS) ))
+        # ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED - AXI_OFFSET_PS) ))
         ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED ) ))
 
         # ==========================================
@@ -279,7 +279,7 @@ while true; do
             fi
             echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
             echo "PPS vs CLK_OUT (M3):     $M3_RAW_PS ps (Filtered: $M3_FILTERED ps)"
-            echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_OFFSET_PS ps (diagnostic)"
+            echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_OFFSET_PS ps"
             
             if [ "$TARGET_OFFSET" -ne 0 ]; then
                 echo "Target Setpoint Offset:  $TARGET_OFFSET ps"
