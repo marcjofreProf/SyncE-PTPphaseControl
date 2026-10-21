@@ -206,10 +206,11 @@ while true; do
 
         # ==========================================
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
-        # Update the filter ONCE per interval (not per sample).
+        # Lock the filter to the first valid measurement to prevent
+        # the half-cycle slip caused by the 25MHz vs 24.987MHz beat.
         # ==========================================
-        if [ "$M3_RAW_PS" -ne 0 ]; then
-            M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_RAW_PS) / M3_FILTER_N ))
+        if [ "$M3_RAW_PS" -ne 0 ] && [ "$M3_FILTERED" -eq 0 ]; then
+            M3_FILTERED=$M3_RAW_PS
         fi
 
         # ==========================================
