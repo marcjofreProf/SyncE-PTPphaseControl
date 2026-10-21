@@ -203,9 +203,6 @@ while true; do
         # --- DIAGNOSTIC ONLY: SyncE TX/RX ---
         AXI_OFFSET_PS=$(( AXI_TICKS * 2081 / 100 ))
         AXI_OFFSET_PS=$(( ( AXI_OFFSET_PS % 16000 ) - 8000 ))
-        if [ "$PlotInfo" = "true" ]; then
-            echo "SyncE TX/RX (FPGA DDMTD): $AXI_TICKS ticks -> $AXI_OFFSET_PS ps (diagnostic)"
-        fi
 
         # ==========================================
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
@@ -217,10 +214,9 @@ while true; do
 
         # ==========================================
         # --- LOOP I: Error Calculation ---
-        # Target is corrected by the slow M3 filter
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED - AXI_OFFSET_PS) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED + AXI_OFFSET_PS) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
