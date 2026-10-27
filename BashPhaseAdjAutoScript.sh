@@ -62,6 +62,18 @@ else
 fi
 
 # ==========================================
+# --- Activate the PPS Signal on GPIO3 ---
+# ==========================================
+# We write "0 0 0 1 0" to the period file. This tells the DP83640
+# to start a 1 Hz output (0.5s high, 0.5s low) immediately.
+echo "Enabling 1-PPS on GPIO3..."
+if ! echo "0 0 0 1 0" | sudo tee /sys/class/ptp/ptp0/period > /dev/null; then
+    echo "ERROR: Failed to enable PPS. Is the Ethernet cable plugged in and the link UP?"
+    # If the PTP clock is dead, the script will read 0 forever, so we exit.
+    exit 1
+fi
+
+# ==========================================
 # --- Main Continuous Loop ---
 # ==========================================
 while true; do
