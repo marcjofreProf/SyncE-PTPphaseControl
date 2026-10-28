@@ -283,8 +283,18 @@ while true; do
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
         # ==========================================
         if [ "$M3_AVG" -ne 0 ]; then
+            # Calculate the difference, but apply the shortest-path logic
             M3_DIFF=$(( M3_AVG - M3_FILTERED ))
             
+            # Wrap the difference to [-20000, 20000]
+            M3_DIFF=$(( M3_DIFF % 40000 ))
+            if [ "$M3_DIFF" -gt 20000 ]; then
+                M3_DIFF=$(( M3_DIFF - 40000 ))
+            elif [ "$M3_DIFF" -le -20000 ]; then
+                M3_DIFF=$(( M3_DIFF + 40000 ))
+            fi
+            
+            # If the wrapped difference is small enough, apply the filter
             if [ "$M3_FILTERED" -eq 0 ] || [ "${M3_DIFF#-}" -lt 10000 ]; then
                 M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_AVG) / M3_FILTER_N ))
             fi
@@ -294,7 +304,7 @@ while true; do
         # --- LOOP I: Error Calculation ---
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
         #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
 
         # ==========================================
