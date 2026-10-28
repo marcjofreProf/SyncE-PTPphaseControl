@@ -304,8 +304,21 @@ while true; do
         # --- LOOP I: Error Calculation ---
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
+        #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
         #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
+        # --- BOOT-TIME "KICK" ---
+        # If the physical M3 filter is stuck exactly at the 180-degree boundary
+        # (between 15 ns and 25 ns), give it a forced 10 ns kick to break the tie.
+        # This forces the system to pick a side and start moving towards 0.
+        if [ "$M3_FILTERED" -gt 15000 ] && [ "$M3_FILTERED" -lt 25000 ]; then
+            echo "KICK: Breaking 180-degree lock at $M3_FILTERED ps..."
+            M3_FILTERED=$(( M3_FILTERED - 10000 )) # Apply the kick
+        elif [ "$M3_FILTERED" -lt -15000 ] && [ "$M3_FILTERED" -gt -25000 ]; then
+            echo "KICK: Breaking -180-degree lock at $M3_FILTERED ps..."
+            M3_FILTERED=$(( M3_FILTERED + 10000 )) # Apply the kick
+        fi
+
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
