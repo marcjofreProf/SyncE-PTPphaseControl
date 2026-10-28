@@ -49,7 +49,7 @@ M3_FILTERED=0
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
 scaled_PIDp=700             # Proportional gain (0.700)
-scaled_PIDi=100             # Integral gain (0.250)
+scaled_PIDi=200             # Integral gain (0.250)
 
 # --- Initialize Persistent Memory ---
 # Because the script stays alive, this variable simply persists in RAM!
@@ -263,7 +263,7 @@ while true; do
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
         #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED - AXI_OFFSET_PS) ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED ) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED ) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
