@@ -39,7 +39,7 @@ AXI_PPS_TS_ADDR="0x43C00004" # PPS Timestamp
 AXI_CLKOUT_TS_ADDR="0x43C00008" # CLKOUT Timestamp
 AXI_VALID_ADDR="0x43C0000C"  # Validity flags
 
-PS_PER_TICK=40020            # 1 / 24.987 MHz = 40.02 ns = 40020 ps
+PS_PER_TICK=10000            # 1 / 100 MHz = 10 ns = 10000 ps
 PS_PER_TICK_factor=1         # We don't need scaling anymore since the math fits in 64-bit integers
 M3_FILTER_N=10               # Slow filter for the PPS/CLK_OUT difference
 M3_FILTERED=0
