@@ -10,6 +10,10 @@
 #       Hence, a sort of calibration or manual compensation could be required.
 #       Or, the CLK_OUT signal should be introduced in IP block to measure this offset.
 
+# Silence kernel console output (level 5 = KERN_NOTICE).
+# The messages are still saved in the ring buffer for dmesg.
+sudo dmesg -n 4
+clear
 # --- CLI Arguments ---
 # 1. Interval Argument
 INTERVAL=${1:-0}
@@ -46,7 +50,7 @@ M3_FILTERED=0
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
-scaled_PIDp=700             # Proportional gain (0.700)
+scaled_PIDp=500             # Proportional gain (0.700)
 scaled_PIDi=50              # Integral gain (0.250)
 
 # --- Initialize Persistent Memory ---
@@ -94,10 +98,6 @@ echo "1-PPS enabled. First edge at PHC time $START_TIME."
 # --- Main Continuous Loop ---
 # ==========================================
 while true; do
-
-    # Clear the terminal at the start of each new interval
-    clear
-
     # --- Runtime Variables for this run ---
     UNWRAPPED_SAMPLES=()
     TICK_SAMPLES=()
@@ -294,8 +294,8 @@ while true; do
         # --- LOOP I: Error Calculation ---
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        # ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED) ))
+        #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
@@ -349,21 +349,28 @@ while true; do
         CORRECTION=$(printf -- "%s0.%012d" "$SIGN" "$ABS_CORRECTION")
 
         if [ "$PlotInfo" = "true" ]; then
-            echo "--- PID DIAGNOSTICS ---"
+            # NOW clear the screen (this is the only place we clear),
+            # so the old summary disappears right before the new one appears.
+            clear
+
+            echo "--- PID DIAGNOSTICS ($(date +%T)) ---"
             if [ "$VALID_SAMPLES" -gt $(( TRIM_COUNT * 2 )) ]; then
                 echo "Trimmed out $TRIM_COUNT high/low samples. Averaged middle $TRIMMED_COUNT."
             fi
             echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps (Filtered: $M3_FILTERED ps)"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
-            
+
             if [ "$TARGET_OFFSET" -ne 0 ]; then
                 echo "Target Setpoint Offset:  $TARGET_OFFSET ps"
             fi
+
             echo "-----------------------"
             echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
             echo "Applying P-Term: $P_TERM ps | I-Term: $I_TERM ps"
             echo "Total calculated step: $CORRECTIONscaled ps"
+            echo "======================="
+            echo "Sleeping for $INTERVAL seconds..."
         fi
 
         sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
@@ -374,10 +381,6 @@ while true; do
         break # Exit the loop immediately if running in single-shot mode
     fi
 
-    if [ "$PlotInfo" = "true" ]; then
-        echo "Sleeping for $INTERVAL seconds..."
-        echo "======================="
-    fi
     sleep "$INTERVAL"
 
 done
