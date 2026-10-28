@@ -283,10 +283,8 @@ while true; do
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
         # ==========================================
         if [ "$M3_AVG" -ne 0 ]; then
-            # Calculate the difference, but apply the shortest-path logic
+            # Calculate the difference, and wrap it to [-20 ns, +20 ns]
             M3_DIFF=$(( M3_AVG - M3_FILTERED ))
-            
-            # Wrap the difference to [-20000, 20000]
             M3_DIFF=$(( M3_DIFF % 40000 ))
             if [ "$M3_DIFF" -gt 20000 ]; then
                 M3_DIFF=$(( M3_DIFF - 40000 ))
