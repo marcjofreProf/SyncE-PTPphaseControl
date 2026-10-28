@@ -283,10 +283,21 @@ while true; do
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
         # ==========================================
         if [ "$M3_AVG" -ne 0 ]; then
+            # --- THE KICK ---
+            # If the raw measurement is stuck at exactly 180 degrees
+            # (between 15 ns and 25 ns), forcibly push it.
+            if [ "$M3_AVG" -gt 15000 ] && [ "$M3_AVG" -lt 25000 ]; then
+                echo "KICK: Raw M3 is at $M3_AVG ps (180 deg). Forcing movement."
+                M3_AVG=$(( M3_AVG - 10000 ))
+            elif [ "$M3_AVG" -lt -15000 ] && [ "$M3_AVG" -gt -25000 ]; then
+                echo "KICK: Raw M3 is at $M3_AVG ps (-180 deg). Forcing movement."
+                M3_AVG=$(( M3_AVG + 10000 ))
+            fi
+
             # 1. Calculate the raw difference
             M3_DIFF=$(( M3_AVG - M3_FILTERED ))
             
-            # 2. Wrap the difference to [-20ns, +20ns] so we don't reject 40ns jumps
+            # 2. Wrap the difference to [-20ns, +20ns]
             M3_DIFF=$(( M3_DIFF % 40000 ))
             if [ "$M3_DIFF" -gt 20000 ]; then
                 M3_DIFF=$(( M3_DIFF - 40000 ))
@@ -294,7 +305,7 @@ while true; do
                 M3_DIFF=$(( M3_DIFF + 40000 ))
             fi
 
-            # 3. If the wrapped difference is small enough, apply the filter
+            # 3. Apply the filter (now with the kicked value)
             if [ "$M3_FILTERED" -eq 0 ] || [ "${M3_DIFF#-}" -lt 15000 ]; then
                 M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_AVG) / M3_FILTER_N ))
             fi
@@ -304,20 +315,6 @@ while true; do
         # --- LOOP I: Error Calculation ---
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
-        #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
-        # --- BOOT-TIME "KICK" ---
-        # If the physical M3 filter is stuck exactly at the 180-degree boundary
-        # (between 15 ns and 25 ns), give it a forced 10 ns kick to break the tie.
-        # This forces the system to pick a side and start moving towards 0.
-        if [ "$M3_FILTERED" -gt 15000 ] && [ "$M3_FILTERED" -lt 25000 ]; then
-            echo "KICK: Breaking 180-degree lock at $M3_FILTERED ps..."
-            M3_FILTERED=$(( M3_FILTERED - 10000 )) # Apply the kick
-        elif [ "$M3_FILTERED" -lt -15000 ] && [ "$M3_FILTERED" -gt -25000 ]; then
-            echo "KICK: Breaking -180-degree lock at $M3_FILTERED ps..."
-            M3_FILTERED=$(( M3_FILTERED + 10000 )) # Apply the kick
-        fi
-
         ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
 
         # ==========================================
