@@ -28,13 +28,12 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=25                 # Number of samples to collect per interval
-TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples (e.g., 3 removes top 3 and bottom 3)
-psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds, or period of the resolution 8ns in picoseconds
+N=45                 # Number of samples to collect per interval
+TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples
+psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
-# --- FPGA Hardware Offset Configuration with respect 25 MHz--- it is performing RX - TX. If the output is a positive number (e.g., 16 ticks), it means the RX phase event occurred 16 helper-clock cycles after the TX phase event.
-# This computed Rx to Tx offset is a direct delta (it is not a round-trip time related measurement).
+# --- FPGA Hardware Offset Configuration ---
 AXI_PHASE_ADDR="0x43C00000"  # Base address
 AXI_PPS_TS_ADDR="0x43C00004" # PPS Timestamp
 AXI_CLKOUT_TS_ADDR="0x43C00008" # CLKOUT Timestamp
@@ -44,15 +43,13 @@ PS_PER_TICK=40020            # 1 / 24.987 MHz = 40.02 ns = 40020 ps
 PS_PER_TICK_factor=1         # We don't need scaling anymore since the math fits in 64-bit integers
 M3_FILTER_N=10               # Slow filter for the PPS/CLK_OUT difference
 M3_FILTERED=0
-# Note: if your RX clock is AHEAD of TX, you may need to invert this by making PS_PER_TICK negative
 
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000      # Scaling value to operate with integers
 scaled_PIDp=700             # Proportional gain (0.700)
-scaled_PIDi=200             # Integral gain (0.250)
+scaled_PIDi=50              # Integral gain (0.250)
 
 # --- Initialize Persistent Memory ---
-# Because the script stays alive, this variable simply persists in RAM!
 INTEGRAL_ACCUM=0
 
 if [ "$INTERVAL" -gt 0 ]; then
@@ -78,14 +75,14 @@ if [ "$(cat /sys/class/ptp/ptp0/pins/GPIO3)" != "2 0" ]; then
     fi
 fi
 
-# 3. Get the current PHC time (required by the student's script)
+# 3. Get the current PHC time
 PHC_TIME=$(sudo phc_ctl eth0 get | sed -n 's/.*clock time is \([0-9]*\)\..*/\1/p')
 if [ -z "$PHC_TIME" ]; then
     echo "ERROR: Could not read the PHC clock. Is the link up?"
     exit 1
 fi
 
-# 4. Write the period. We use the exact format the student used (with start time).
+# 4. Write the period with a start time 3 seconds in the future.
 START_TIME=$((PHC_TIME + 3))
 if ! sudo sh -c "echo '0 $START_TIME 0 1 0' > /sys/class/ptp/ptp0/period"; then
     echo "ERROR: Failed to enable PPS. Is the Ethernet cable plugged in and the link UP?"
@@ -104,8 +101,9 @@ while true; do
     # --- Runtime Variables for this run ---
     UNWRAPPED_SAMPLES=()
     TICK_SAMPLES=()
+    M3_SAMPLES=()
+    AXI_OFFSET_SAMPLES=()
     VALID_SAMPLES=0
-    M3_RAW_PS=0
 
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
@@ -167,8 +165,9 @@ while true; do
             if [ "$M3_RAW_PS" -gt 20000 ]; then
                 M3_RAW_PS=$(( M3_RAW_PS - 40000 ))
             fi
-        else
-            M3_RAW_PS=0
+            
+            # Add to M3 array for averaging
+            M3_SAMPLES+=("$M3_RAW_PS")
         fi
 
         if [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
@@ -176,7 +175,6 @@ while true; do
             unsigned_val=$(printf "%d" "$AXI_RAW_HEX")
             
             # 2. Convert unsigned 32-bit to signed 32-bit
-            # If the value is >= 0x80000000 (2147483648), it is negative
             if [ "$unsigned_val" -ge 2147483648 ]; then
                 curr_tick=$(( unsigned_val - 4294967296 ))
             else
@@ -185,6 +183,11 @@ while true; do
         else
             curr_tick=0
         fi
+
+        # Calculate the AXI offset for this single sample (in ps)
+        curr_axi_ps=$(( curr_tick * 2081 / 100 ))
+        curr_axi_ps=$(( ( curr_axi_ps % 8000 ) - 4000 ))
+        AXI_OFFSET_SAMPLES+=("$curr_axi_ps")
 
         TICK_SAMPLES+=("$curr_tick")
 
@@ -220,7 +223,6 @@ while true; do
             TRIMMED_TICK_SUM=0
             TRIMMED_COUNT=0
             
-            # Sum the values, skipping the first $TRIM_COUNT and last $TRIM_COUNT items
             for (( j=TRIM_COUNT; j<VALID_SAMPLES-TRIM_COUNT; j++ ))
             do
                 TRIMMED_SUM=$(( TRIMMED_SUM + SORTED[j] ))
@@ -232,29 +234,59 @@ while true; do
             AXI_TICKS=$(( TRIMMED_TICK_SUM / TRIMMED_COUNT ))
         fi
 
-        # --- DIAGNOSTIC ONLY: SyncE TX/RX ---
-        AXI_OFFSET_PS=$(( AXI_TICKS * 2081 / 100 ))
-        AXI_OFFSET_PS=$(( ( AXI_OFFSET_PS % 8000 ) - 4000 ))
+        # ==========================================
+        # --- Average M3 and AXI over the interval ---
+        # ==========================================
+        M3_AVG=0
+        COUNT_M3=0
+        if [ ${#M3_SAMPLES[@]} -gt 0 ]; then
+            SORTED_M3=($(printf "%s\n" "${M3_SAMPLES[@]}" | sort -n))
+            if [ ${#SORTED_M3[@]} -le $(( TRIM_COUNT * 2 )) ]; then
+                for val in "${SORTED_M3[@]}"; do
+                    M3_AVG=$(( M3_AVG + val ))
+                    COUNT_M3=$(( COUNT_M3 + 1 ))
+                done
+            else
+                for (( j=TRIM_COUNT; j<${#SORTED_M3[@]}-TRIM_COUNT; j++ ))
+                do
+                    M3_AVG=$(( M3_AVG + SORTED_M3[j] ))
+                    COUNT_M3=$(( COUNT_M3 + 1 ))
+                done
+            fi
+            if [ "$COUNT_M3" -gt 0 ]; then
+                M3_AVG=$(( M3_AVG / COUNT_M3 ))
+            fi
+        fi
+
+        AXI_AVG=0
+        COUNT_AXI=0
+        if [ ${#AXI_OFFSET_SAMPLES[@]} -gt 0 ]; then
+            SORTED_AXI=($(printf "%s\n" "${AXI_OFFSET_SAMPLES[@]}" | sort -n))
+            if [ ${#SORTED_AXI[@]} -le $(( TRIM_COUNT * 2 )) ]; then
+                for val in "${SORTED_AXI[@]}"; do
+                    AXI_AVG=$(( AXI_AVG + val ))
+                    COUNT_AXI=$(( COUNT_AXI + 1 ))
+                done
+            else
+                for (( j=TRIM_COUNT; j<${#SORTED_AXI[@]}-TRIM_COUNT; j++ ))
+                do
+                    AXI_AVG=$(( AXI_AVG + SORTED_AXI[j] ))
+                    COUNT_AXI=$(( COUNT_AXI + 1 ))
+                done
+            fi
+            if [ "$COUNT_AXI" -gt 0 ]; then
+                AXI_AVG=$(( AXI_AVG / COUNT_AXI ))
+            fi
+        fi
 
         # ==========================================
         # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
-        # Update the filter ONCE per interval.
-        # GLITCH REJECTION: Because of the 25MHz vs 24.987MHz beat,
-        # M3 can randomly jump by half a cycle (20 ns). If the jump
-        # is too large, we ignore the sample and keep the old value.
         # ==========================================
-        if [ "$M3_RAW_PS" -ne 0 ]; then
-            # Calculate the difference between the new raw value and the old filtered value
-            M3_DIFF=$(( M3_RAW_PS - M3_FILTERED ))
+        if [ "$M3_AVG" -ne 0 ]; then
+            M3_DIFF=$(( M3_AVG - M3_FILTERED ))
             
-            # If the difference is larger than 10 ns (half of half-period), it's a glitch.
-            # Also handle the case where M3_FILTERED is still 0 (initial lock).
             if [ "$M3_FILTERED" -eq 0 ] || [ "${M3_DIFF#-}" -lt 10000 ]; then
-                M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_RAW_PS) / M3_FILTER_N ))
-            else
-                # Glitch detected: M3_RAW_PS is jumping by ~20 ns. Ignore it.
-                # M3_FILTERED stays the same.
-                M3_FILTERED=$M3_FILTERED
+                M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_AVG) / M3_FILTER_N ))
             fi
         fi
 
@@ -262,15 +294,14 @@ while true; do
         # --- LOOP I: Error Calculation ---
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED - AXI_OFFSET_PS) ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED ) ))
+        # ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
+        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET + M3_FILTERED + AXI_AVG) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
 
         # 1. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
-        # This fixes the circular wrap-around logic for the setpoint.
         ERROR=$(( ERROR % psCLK_OUTperiod ))
         if [ "$ERROR" -le -$psCLK_OUTperiodHalf ]; then
             ERROR=$(( ERROR + psCLK_OUTperiod ))
@@ -295,7 +326,6 @@ while true; do
         CORRECTIONscaled=$(( P_TERM + I_TERM ))
 
         # 5. Final Phase Output Wrap (Shortest Path logic for execution)
-        # Prevents stepping by e.g. +80ns when -20ns achieves the exact same phase.
         CORRECTIONscaled=$(( CORRECTIONscaled % psCLK_OUTperiod ))
         if [ "$CORRECTIONscaled" -le -$psCLK_OUTperiodHalf ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled + psCLK_OUTperiod ))
@@ -324,8 +354,8 @@ while true; do
                 echo "Trimmed out $TRIM_COUNT high/low samples. Averaged middle $TRIMMED_COUNT."
             fi
             echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
-            echo "PPS vs CLK_OUT (M3):     $M3_RAW_PS ps (Filtered: $M3_FILTERED ps)"
-            echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_OFFSET_PS ps"
+            echo "PPS vs CLK_OUT (M3):     $M3_AVG ps (Filtered: $M3_FILTERED ps)"
+            echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
             
             if [ "$TARGET_OFFSET" -ne 0 ]; then
                 echo "Target Setpoint Offset:  $TARGET_OFFSET ps"
