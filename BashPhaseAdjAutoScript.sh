@@ -32,7 +32,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=40                # Number of samples to collect per interval
+N=80                # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
