@@ -295,8 +295,8 @@ while true; do
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
         #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
-        #ERROR=$(( M3_FILTERED - (TARGET_OFFSET - COMPENSATED_PHASE) ))
-        ERROR=$(( M3_FILTERED - (TARGET_OFFSET) ))
+        ERROR=$(( M3_FILTERED - (TARGET_OFFSET - COMPENSATED_PHASE) ))
+        #ERROR=$(( M3_FILTERED - (TARGET_OFFSET) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
