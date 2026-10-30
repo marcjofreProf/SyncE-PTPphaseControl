@@ -32,7 +32,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=75                 # Number of samples to collect per interval
+N=25                 # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -163,11 +163,12 @@ while true; do
             # Wrap M3 to the CLK_OUT period (40 ns = 40000 ps).
             # The FPGA measures the physical time to the next CLK_OUT edge,
             # so the physical ambiguity is exactly one full 40 ns period.
-            M3_RAW_PS=$(( M3_RAW_PS % 40000 ))
+            # Wrap M3 to a 16 ns window (-8 ns to +8 ns) to match the DP83640's 8 ns boundaries.
+            M3_RAW_PS=$(( M3_RAW_PS % 16000 ))
             
-            # If > 20 ns, treat as negative phase
-            if [ "$M3_RAW_PS" -gt 20000 ]; then
-                M3_RAW_PS=$(( M3_RAW_PS - 40000 ))
+            # If > 8 ns, treat as negative phase
+            if [ "$M3_RAW_PS" -gt 8000 ]; then
+                M3_RAW_PS=$(( M3_RAW_PS - 16000 ))
             fi
             
             # Add to M3 array for averaging
