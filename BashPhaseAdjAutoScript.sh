@@ -280,42 +280,26 @@ while true; do
         fi
 
         # ==========================================
-        # --- LOOP III: Filter PPS vs CLK_OUT (M3) ---
+        # --- LOOP III: Average PPS vs CLK_OUT (M3) ---
         # ==========================================
         if [ "$M3_AVG" -ne 0 ]; then
-            # --- THE KICK ---
-            # If the raw measurement is stuck at exactly 180 degrees
-            # (between 15 ns and 25 ns), forcibly push it.
-            if [ "$M3_AVG" -gt 15000 ] && [ "$M3_AVG" -lt 25000 ]; then
-                echo "KICK: Raw M3 is at $M3_AVG ps (180 deg). Forcing movement."
-                M3_AVG=$(( M3_AVG - 10000 ))
-            elif [ "$M3_AVG" -lt -15000 ] && [ "$M3_AVG" -gt -25000 ]; then
-                echo "KICK: Raw M3 is at $M3_AVG ps (-180 deg). Forcing movement."
-                M3_AVG=$(( M3_AVG + 10000 ))
-            fi
-
-            # 1. Calculate the raw difference
-            M3_DIFF=$(( M3_AVG - M3_FILTERED ))
-            
-            # 2. Wrap the difference to [-20ns, +20ns]
-            M3_DIFF=$(( M3_DIFF % 40000 ))
-            if [ "$M3_DIFF" -gt 20000 ]; then
-                M3_DIFF=$(( M3_DIFF - 40000 ))
-            elif [ "$M3_DIFF" -le -20000 ]; then
-                M3_DIFF=$(( M3_DIFF + 40000 ))
-            fi
-
-            # 3. Apply the filter (now with the kicked value)
-            if [ "$M3_FILTERED" -eq 0 ] || [ "${M3_DIFF#-}" -lt 15000 ]; then
-                M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_AVG) / M3_FILTER_N ))
-            fi
+            M3_FILTERED=$(( (M3_FILTERED * (M3_FILTER_N - 1) + M3_AVG) / M3_FILTER_N ))
         fi
 
         # ==========================================
         # --- LOOP I: Error Calculation ---
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
+        
+        # Use the sign of AXI_AVG to break the 180-degree ambiguity.
+        # If AXI_AVG > 0, we are on the "wrong" side of the cycle.
+        if [ "$AXI_AVG" -gt 0 ]; then
+            # 180-degree flip
+            ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED + 20000) ))
+        else
+            # Normal path
+            ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
+        fi
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
