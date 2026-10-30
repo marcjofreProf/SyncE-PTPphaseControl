@@ -125,11 +125,11 @@ while true; do
 
         # Wrap the DP83640 measurement to a 16 ns window (-8 ns to +8 ns)
         # to match the DP83640's internal 8 ns resolution boundaries.
-        val=$(( val % 16000 ))
-        if [ "$val" -gt 8000 ]; then
-            val=$(( val - 16000 ))
-        elif [ "$val" -le -8000 ]; then
-            val=$(( val + 16000 ))
+        val=$(( val % 40000 ))
+        if [ "$val" -gt 20000 ]; then
+            val=$(( val - 40000 ))
+        elif [ "$val" -le -20000 ]; then
+            val=$(( val + 40000 ))
         fi
 
         # Store the unwrapped value in our array
@@ -164,11 +164,11 @@ while true; do
             # The FPGA measures the physical time to the next CLK_OUT edge,
             # so the physical ambiguity is exactly one full 40 ns period.
             # Wrap M3 to a 16 ns window (-8 ns to +8 ns) to match the DP83640's 8 ns boundaries.
-            M3_RAW_PS=$(( M3_RAW_PS % 16000 ))
+            M3_RAW_PS=$(( M3_RAW_PS % 40000 ))
             
             # If > 8 ns, treat as negative phase
-            if [ "$M3_RAW_PS" -gt 8000 ]; then
-                M3_RAW_PS=$(( M3_RAW_PS - 16000 ))
+            if [ "$M3_RAW_PS" -gt 20000 ]; then
+                M3_RAW_PS=$(( M3_RAW_PS - 40000 ))
             fi
             
             # Add to M3 array for averaging
@@ -295,8 +295,8 @@ while true; do
         # ==========================================
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
         #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
-        ERROR=$(( M3_FILTERED - (TARGET_OFFSET + COMPENSATED_PHASE) ))
-        #ERROR=$(( M3_FILTERED - (TARGET_OFFSET) ))
+        #ERROR=$(( M3_FILTERED - (TARGET_OFFSET + COMPENSATED_PHASE) ))
+        ERROR=$(( M3_FILTERED - (TARGET_OFFSET) ))
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
