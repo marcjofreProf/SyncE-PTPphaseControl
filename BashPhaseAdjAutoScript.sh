@@ -10,6 +10,20 @@
 #       Hence, a sort of calibration or manual compensation could be required.
 #       Or, the CLK_OUT signal should be introduced in IP block to measure this offset.
 
+# Note on CLK_OUT source (PGM vs FCO):
+# The DP83640 can generate CLK_OUT from either FCO or PGM. PGM is activated here
+# (bit 14 of PTP_COC set) because it offers a larger phase correction range and
+# does not lose alignment on link loss. PGM's long-term jitter is worse than
+# FCO's. The PI loop in this script corrects the residual CLK_OUT jitter.
+#
+# Note on the PPS phase offset:
+# TARGET_OFFSET is applied to the PPS signal via the sysfs "period" interface.
+# The driver's periodic_output programs the DP83640 trigger with an absolute
+# start time computed as (current PHC time + margin + rounded offset). The
+# PTP_PEROUT_PHASE flag is not used. The DP83640's internal clock resolution
+# is 8 ns, so the requested offset is rounded to the nearest 8000 ps by the
+# hardware. Sub-8ns offsets cannot be represented.
+
 # Silence kernel console output (level 5 = KERN_NOTICE).
 # The messages are still saved in the ring buffer for dmesg.
 sudo dmesg -n 4
@@ -32,7 +46,7 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=80                # Number of samples to collect per interval
+N=20                # Number of samples to collect per interval
 TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
@@ -63,7 +77,7 @@ else
 fi
 
 # ==========================================
-# --- Activate the PPS Signal on GPIO3 ---
+# --- Activate the PPS Signal on GPIO3 with phase offset ---
 # ==========================================
 echo "Enabling 1-PPS on GPIO3..."
 
@@ -79,20 +93,47 @@ if [ "$(cat /sys/class/ptp/ptp0/pins/GPIO3)" != "2 0" ]; then
     fi
 fi
 
-# 3. Get the current PHC time
+# 3. Get the current PHC time (seconds)
 PHC_TIME=$(sudo phc_ctl eth0 get | sed -n 's/.*clock time is \([0-9]*\)\..*/\1/p')
 if [ -z "$PHC_TIME" ]; then
     echo "ERROR: Could not read the PHC clock. Is the link up?"
     exit 1
 fi
 
-# 4. Write the period with a start time 3 seconds in the future.
-START_TIME=$((PHC_TIME + 3))
-if ! sudo sh -c "echo '0 $START_TIME 0 1 0' > /sys/class/ptp/ptp0/period"; then
+# 4. Round TARGET_OFFSET (ps) to the nearest 8000 ps (8 ns) hardware boundary.
+RESOLUTION_PS=8000
+if [ "$TARGET_OFFSET" -ge 0 ]; then
+    ROUNDED_PS=$(( (TARGET_OFFSET + RESOLUTION_PS/2) / RESOLUTION_PS * RESOLUTION_PS ))
+else
+    ROUNDED_PS=$(( (TARGET_OFFSET - RESOLUTION_PS/2) / RESOLUTION_PS * RESOLUTION_PS ))
+fi
+
+# Convert the rounded offset from picoseconds to nanoseconds for the sysfs write.
+ROUNDED_NS=$(( ROUNDED_PS / 1000 ))
+
+# 5. Compute the absolute start time = current PHC time + 3 s + phase offset.
+#    The nanoseconds field must be in [0, 1000000000).
+START_TIME=$(( PHC_TIME + 3 ))
+START_NSEC=$(( ROUNDED_NS ))
+while [ "$START_NSEC" -lt 0 ]; do
+    START_NSEC=$(( START_NSEC + 1000000000 ))
+    START_TIME=$(( START_TIME - 1 ))
+done
+if [ "$START_NSEC" -ge 1000000000 ]; then
+    START_NSEC=$(( START_NSEC - 1000000000 ))
+    START_TIME=$(( START_TIME + 1 ))
+fi
+
+# 6. Write the period: channel 0, start at START_TIME.START_NSEC, period 1 s.
+if ! sudo sh -c "echo '0 $START_TIME $START_NSEC 1 0' > /sys/class/ptp/ptp0/period"; then
     echo "ERROR: Failed to enable PPS. Is the Ethernet cable plugged in and the link UP?"
     exit 1
 fi
-echo "1-PPS enabled. First edge at PHC time $START_TIME."
+
+if [ "$ROUNDED_PS" -ne "$TARGET_OFFSET" ]; then
+    echo "Note: TARGET_OFFSET=${TARGET_OFFSET}ps rounded to ${ROUNDED_PS}ps (8 ns resolution)."
+fi
+echo "1-PPS enabled. First edge at PHC time ${START_TIME}.${START_NSEC} (offset ${ROUNDED_PS} ps)."
 
 # ==========================================
 # --- Main Continuous Loop ---
@@ -125,11 +166,11 @@ while true; do
 
         # Wrap the DP83640 measurement to a 16 ns window (-8 ns to +8 ns)
         # to match the DP83640's internal 8 ns resolution boundaries.
-        val=$(( val % 40000 ))
-        if [ "$val" -gt 20000 ]; then
-            val=$(( val - 40000 ))
-        elif [ "$val" -le -20000 ]; then
-            val=$(( val + 40000 ))
+        val=$(( val % psCLK_OUTperiod ))
+        if [ "$val" -gt "$psCLK_OUTperiodHalf" ]; then
+            val=$(( val - psCLK_OUTperiod ))
+        elif [ "$val" -le "-$psCLK_OUTperiodHalf" ]; then
+            val=$(( val + psCLK_OUTperiod ))
         fi
 
         # Store the unwrapped value in our array
@@ -164,11 +205,9 @@ while true; do
             # The FPGA measures the physical time to the next CLK_OUT edge,
             # so the physical ambiguity is exactly one full 40 ns period.
             # Wrap M3 to a 16 ns window (-8 ns to +8 ns) to match the DP83640's 8 ns boundaries.
-            M3_RAW_PS=$(( M3_RAW_PS % 40000 ))
-            
-            # If > 8 ns, treat as negative phase
-            if [ "$M3_RAW_PS" -gt 20000 ]; then
-                M3_RAW_PS=$(( M3_RAW_PS - 40000 ))
+            M3_RAW_PS=$(( M3_RAW_PS % psCLK_OUTperiod ))
+            if [ "$M3_RAW_PS" -gt "$psCLK_OUTperiodHalf" ]; then
+                M3_RAW_PS=$(( M3_RAW_PS - psCLK_OUTperiod ))
             fi
             
             # Add to M3 array for averaging
@@ -296,7 +335,8 @@ while true; do
         COMPENSATED_PHASE=$(( RAW_AVERAGE ))
         #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
         #ERROR=$(( M3_FILTERED - (TARGET_OFFSET + COMPENSATED_PHASE) ))
-        ERROR=$(( M3_FILTERED - (TARGET_OFFSET) ))
+        ERROR=$(( M3_FILTERED - 0 ))
+
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
@@ -363,7 +403,8 @@ while true; do
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
 
             if [ "$TARGET_OFFSET" -ne 0 ]; then
-                echo "Target Setpoint Offset:  $TARGET_OFFSET ps"
+                echo "Target Setpoint Offset:  $TARGET_OFFSET ps (rounded to $ROUNDED_PS ps)"
+                echo "Hardware resolution:     ${RESOLUTION_PS} ps (8 ns)"
             fi
 
             echo "-----------------------"
