@@ -11,10 +11,8 @@
 #       Or, the CLK_OUT signal should be introduced in IP block to measure this offset.
 
 # Note on CLK_OUT source (PGM vs FCO):
-# The DP83640 can generate CLK_OUT from either FCO or PGM. PGM is activated here
-# (bit 14 of PTP_COC set) because it offers a larger phase correction range and
-# does not lose alignment on link loss. PGM's long-term jitter is worse than
-# FCO's. The PI loop in this script corrects the residual CLK_OUT jitter.
+# The DP83640 can generate CLK_OUT from either FCO or PGM.
+# The PI loop in this script corrects the residual CLK_OUT jitter.
 #
 # Note on the PPS phase offset:
 # TARGET_OFFSET is applied to the PPS signal via the sysfs "period" interface.
