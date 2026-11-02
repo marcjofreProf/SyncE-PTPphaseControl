@@ -24,7 +24,7 @@
 
 # Silence kernel console output (level 5 = KERN_NOTICE).
 # The messages are still saved in the ring buffer for dmesg.
-sudo dmesg -n 4
+# sudo dmesg -n 4
 clear
 # --- CLI Arguments ---
 # 1. Interval Argument
@@ -138,41 +138,42 @@ echo "1-PPS enabled. First edge at PHC time ${START_TIME}.${START_NSEC} (offset 
 # ==========================================
 while true; do
     # --- Runtime Variables for this run ---
-    UNWRAPPED_SAMPLES=()
+#    UNWRAPPED_SAMPLES=()
     TICK_SAMPLES=()
     M3_SAMPLES=()
     AXI_OFFSET_SAMPLES=()
-    VALID_SAMPLES=0
+    LOOP_COUNT=0
 
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
     do
         # 1. Clear the kernel ring buffer so we don't read stale data
         sudo dmesg -c > /dev/null
-        
-        sleep 0.80
-        sudo phc_ctl $INTERFACE -- phaseadj 0 > /dev/null 2>&1
-        sleep 0.20
+        sleep 1.2
 
-        val=$(dmesg | grep "PHC_PHASE_CLKOUT_PS:" | tail -1 | awk -F': ' '{print $NF}')
-        
-        # Strict check: Is it non-empty AND a valid integer?
-        if ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
-            echo "Error: Invalid or missing offset from $INTERFACE at sample $i (Got: '$val')"
-            continue
-        fi
-
-        # Wrap the DP83640 measurement to a 16 ns window (-8 ns to +8 ns)
-        # to match the DP83640's internal 8 ns resolution boundaries.
-        val=$(( val % psCLK_OUTperiod ))
-        if [ "$val" -gt "$psCLK_OUTperiodHalf" ]; then
-            val=$(( val - psCLK_OUTperiod ))
-        elif [ "$val" -le "-$psCLK_OUTperiodHalf" ]; then
-            val=$(( val + psCLK_OUTperiod ))
-        fi
-
-        # Store the unwrapped value in our array
-        UNWRAPPED_SAMPLES+=("$val")
+#        sleep 0.80
+#        sudo phc_ctl $INTERFACE -- phaseadj 0 > /dev/null 2>&1
+#        sleep 0.20
+#
+#        val=$(dmesg | grep "PHC_PHASE_CLKOUT_PS:" | tail -1 | awk -F': ' '{print $NF}')
+#        
+#        # Strict check: Is it non-empty AND a valid integer?
+#        if ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
+#            echo "Error: Invalid or missing offset from $INTERFACE at sample $i (Got: '$val')"
+#            continue
+#        fi
+#
+#        # Wrap the DP83640 measurement to a 16 ns window (-8 ns to +8 ns)
+#        # to match the DP83640's internal 8 ns resolution boundaries.
+#        val=$(( val % psCLK_OUTperiod ))
+#        if [ "$val" -gt "$psCLK_OUTperiodHalf" ]; then
+#            val=$(( val - psCLK_OUTperiod ))
+#        elif [ "$val" -le "-$psCLK_OUTperiodHalf" ]; then
+#            val=$(( val + psCLK_OUTperiod ))
+#        fi
+#
+#        # Store the unwrapped value in our array
+#        UNWRAPPED_SAMPLES+=("$val")
 
         # --- Read Hardware Phase from FPGA during sample collection ---
         AXI_RAW_HEX=$(sudo devmem $AXI_PHASE_ADDR 32 2>/dev/null)
@@ -212,7 +213,7 @@ while true; do
             M3_SAMPLES+=("$M3_RAW_PS")
         fi
 
-        if [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
+        if [[ "$VALID_CLEAN" == "3" ]] && [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
             # 1. Convert hex to unsigned decimal
             unsigned_val=$(printf "%d" "$AXI_RAW_HEX")
             
@@ -222,57 +223,47 @@ while true; do
             else
                 curr_tick=$unsigned_val
             fi
-        else
-            curr_tick=0
+
+            # Calculate the AXI offset for this single sample (in ps)
+            curr_axi_ps=$(( curr_tick * 2081 / 100 ))
+            curr_axi_ps=$(( ( curr_axi_ps % 8000 ) - 4000 ))
+            AXI_OFFSET_SAMPLES+=("$curr_axi_ps")
+
+            TICK_SAMPLES+=("$curr_tick")
         fi
 
-        # Calculate the AXI offset for this single sample (in ps)
-        curr_axi_ps=$(( curr_tick * 2081 / 100 ))
-        curr_axi_ps=$(( ( curr_axi_ps % 8000 ) - 4000 ))
-        AXI_OFFSET_SAMPLES+=("$curr_axi_ps")
-
-        TICK_SAMPLES+=("$curr_tick")
-
-        VALID_SAMPLES=$(( VALID_SAMPLES + 1 ))
+        LOOP_COUNT=$(( LOOP_COUNT + 1 ))
     done
 
     # Protect against total read failure
-    if [ "$VALID_SAMPLES" -eq 0 ]; then
-        echo "Error: No valid samples collected. Skipping this interval."
+    if [ "$LOOP_COUNT" -eq 0 ]; then
+        echo "Error: No samples collected. Skipping this interval."
     else
         # ==========================================
         # --- Trimmed Averaging Math ---
         # ==========================================
-        if [ "$VALID_SAMPLES" -le $(( TRIM_COUNT * 2 )) ]; then
+        if [ ${#TICK_SAMPLES[@]} -eq 0 ]; then
+            AXI_TICKS=0
+        elif [ ${#TICK_SAMPLES[@]} -le $(( TRIM_COUNT * 2 )) ]; then
             # Not enough samples to trim safely, fallback to a normal average
             echo "Warning: Not enough samples for trimmed average. Doing normal mean."
-            TRIMMED_SUM=0
             TRIMMED_TICK_SUM=0
-            for val in "${UNWRAPPED_SAMPLES[@]}"; do
-                TRIMMED_SUM=$(( TRIMMED_SUM + val ))
-            done
             for t_val in "${TICK_SAMPLES[@]}"; do
                 TRIMMED_TICK_SUM=$(( TRIMMED_TICK_SUM + t_val ))
             done
-            RAW_AVERAGE=$(( TRIMMED_SUM / VALID_SAMPLES ))
-            AXI_TICKS=$(( TRIMMED_TICK_SUM / VALID_SAMPLES ))
+            AXI_TICKS=$(( TRIMMED_TICK_SUM / ${#TICK_SAMPLES[@]} ))
         else
-            # Sort the unwrapped array and tick array numerically
-            SORTED=($(printf "%s\n" "${UNWRAPPED_SAMPLES[@]}" | sort -n))
             SORTED_TICKS=($(printf "%s\n" "${TICK_SAMPLES[@]}" | sort -n))
-            
-            TRIMMED_SUM=0
+
             TRIMMED_TICK_SUM=0
             TRIMMED_COUNT=0
-            
-            for (( j=TRIM_COUNT; j<VALID_SAMPLES-TRIM_COUNT; j++ ))
+
+            for (( j=TRIM_COUNT; j<${#SORTED_TICKS[@]}-TRIM_COUNT; j++ ))
             do
-                TRIMMED_SUM=$(( TRIMMED_SUM + SORTED[j] ))
                 TRIMMED_TICK_SUM=$(( TRIMMED_TICK_SUM + SORTED_TICKS[j] ))
                 TRIMMED_COUNT=$(( TRIMMED_COUNT + 1 ))
             done
-            
-            RAW_AVERAGE=$(( TRIMMED_SUM / TRIMMED_COUNT ))
+
             AXI_TICKS=$(( TRIMMED_TICK_SUM / TRIMMED_COUNT ))
         fi
 
@@ -330,7 +321,7 @@ while true; do
         # ==========================================
         # --- LOOP I: Error Calculation ---
         # ==========================================
-        COMPENSATED_PHASE=$(( RAW_AVERAGE ))
+#        COMPENSATED_PHASE=$(( RAW_AVERAGE ))
         #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
         #ERROR=$(( M3_FILTERED - (TARGET_OFFSET + COMPENSATED_PHASE) ))
         ERROR=$(( M3_FILTERED - 0 ))
@@ -393,10 +384,10 @@ while true; do
             clear
 
             echo "--- PID DIAGNOSTICS ($(date +%T)) ---"
-            if [ "$VALID_SAMPLES" -gt $(( TRIM_COUNT * 2 )) ]; then
-                echo "Trimmed out $TRIM_COUNT high/low samples. Averaged middle $TRIMMED_COUNT."
+            if [ ${#M3_SAMPLES[@]} -gt $(( TRIM_COUNT * 2 )) ]; then
+                echo "M3 samples: ${#M3_SAMPLES[@]} valid, trimmed to $(( ${#M3_SAMPLES[@]} - 2 * TRIM_COUNT ))."
             fi
-            echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
+#            echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
 
