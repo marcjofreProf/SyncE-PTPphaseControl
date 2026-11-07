@@ -1,34 +1,17 @@
 #!/bin/bash
 # Bash script to automatically execute the PI phase adjustment algorithm for SynE-PTP
 # Usage: 
-#   ./BashPhaseAdjAutoScript.sh             (Runs once, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 15          (Runs continuously, 15s interval, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh             (Runs continuously, 15s interval, target is 0 ps)
+#   ./BashPhaseAdjAutoScript.sh 30          (Runs continuously, 30s interval, target is 0 ps)
 #   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
 
-# Note: Still, since the internal DP83640 PHY PTP clock is actually of 8 ns, everynow and then it can fall one cycle (or half cycle) out of the true center.
-#       This has to do with each specify PHY internal compensation in dp83640.c driver: correction = (((3 * reference_clock_period) + 11) * 1000).
-#       Hence, a sort of calibration or manual compensation could be required.
-#       Or, the CLK_OUT signal should be introduced in IP block to measure this offset.
-
-# Note on CLK_OUT source (PGM vs FCO):
-# The DP83640 can generate CLK_OUT from either FCO or PGM.
-# The PI loop in this script corrects the residual CLK_OUT jitter.
-#
-# Note on the PPS phase offset:
-# TARGET_OFFSET is applied to the PPS signal via the sysfs "period" interface.
-# The driver's periodic_output programs the DP83640 trigger with an absolute
-# start time computed as (current PHC time + margin + rounded offset). The
-# PTP_PEROUT_PHASE flag is not used. The DP83640's internal clock resolution
-# is 8 ns, so the requested offset is rounded to the nearest 8000 ps by the
-# hardware. Sub-8ns offsets cannot be represented.
-
 # Silence kernel console output (level 5 = KERN_NOTICE).
-# The messages are still saved in the ring buffer for dmesg.
 # sudo dmesg -n 4
 clear
+
 # --- CLI Arguments ---
-# 1. Interval Argument
-INTERVAL=${1:-0}
+# 1. Interval Argument (Default is 15)
+INTERVAL=${1:-15}
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]]; then
     echo "Error: Interval argument must be a positive integer (e.g., 15)."
     exit 1
@@ -44,8 +27,8 @@ fi
 # --- Configuration ---
 PlotInfo=true       # Set to true to see the PID math
 INTERFACE="eth0"
-N=35                # Number of samples to collect per interval
-TRIM_COUNT=4         # Trim average: Discard this many highest and lowest samples
+N=60                # Number of samples to collect per interval
+TRIM_COUNT=4        # Trim average: Discard this many highest and lowest samples
 psCLK_OUTperiod=$(( 4000 * 10 ))      # Period of the CLK_OUT signal in picoseconds
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
@@ -61,84 +44,101 @@ M3_FILTER_N=10               # Slow filter for the PPS/CLK_OUT difference
 M3_FILTERED=0
 
 # --- PI Controller Tuning ---
-scaled_PID_factor=1000      # Scaling value to operate with integers
-scaled_PIDp=550             # Proportional gain (0.700)
-scaled_PIDi=50              # Integral gain (0.250)
+scaled_PID_factor=1000       # Scaling value to operate with integers
+scaled_PIDp=550              # Proportional gain
+scaled_PIDi=25               # Integral gain
 
 # --- Initialize Persistent Memory ---
 INTEGRAL_ACCUM=0
 
-if [ "$INTERVAL" -gt 0 ]; then
-    echo "Starting SyncE-PTP PI Phase Controller (Continuous: ${INTERVAL}s interval | Target: ${TARGET_OFFSET}ps)..."
-else
-    echo "Starting SyncE-PTP PI Phase Controller (Single-shot mode | Target: ${TARGET_OFFSET}ps)..."
-fi
-
 # ==========================================
-# --- Activate the PPS Signal on GPIO3 with phase offset ---
+# --- PPS Activation Function ---
 # ==========================================
-echo "Enabling 1-PPS on GPIO3..."
-
-# 1. Disable any existing periodic output first
-sudo sh -c "echo '0 0 0 0 0' > /sys/class/ptp/ptp0/period" 2>/dev/null
-
-# 2. Check if GPIO3 is already configured as PEROUT (function 2, channel 0)
-if [ "$(cat /sys/class/ptp/ptp0/pins/GPIO3)" != "2 0" ]; then
-    echo "Configuring GPIO3 as PEROUT..."
-    if ! sudo sh -c "echo '2 0' > /sys/class/ptp/ptp0/pins/GPIO3"; then
-        echo "ERROR: Could not set GPIO3 to PEROUT. Check that the driver is patched correctly."
-        exit 1
+ensure_pps_activated() {
+    # Check if the PPS is already running
+    if [ -f /sys/class/ptp/ptp0/period ]; then
+        CURRENT_PERIOD=$(cat /sys/class/ptp/ptp0/period)
+        if [[ "$CURRENT_PERIOD" != "0 0 0 0 0" ]] && [[ -n "$CURRENT_PERIOD" ]]; then
+            return 0 # PPS is already running, do nothing
+        fi
     fi
+
+    echo "PPS is not active. Enabling 1-PPS on GPIO3..."
+
+    # 1. Disable any existing periodic output first
+    sudo sh -c "echo '0 0 0 0 0' > /sys/class/ptp/ptp0/period" 2>/dev/null
+
+    # 2. Check if GPIO3 is already configured as PEROUT
+    if [ "$(cat /sys/class/ptp/ptp0/pins/GPIO3 2>/dev/null)" != "2 0" ]; then
+        echo "Configuring GPIO3 as PEROUT..."
+        sudo sh -c "echo '2 0' > /sys/class/ptp/ptp0/pins/GPIO3" || {
+            echo "ERROR: Could not set GPIO3 to PEROUT."
+            return 1
+        }
+    fi
+
+    # 3. Get the current PHC time (seconds)
+    PHC_TIME=$(sudo phc_ctl eth0 get | sed -n 's/.*clock time is \([0-9]*\)\..*/\1/p')
+    if [ -z "$PHC_TIME" ]; then
+        echo "ERROR: Could not read the PHC clock. Is the link up?"
+        return 1
+    fi
+
+    # 4. Round TARGET_OFFSET to nearest 8000 ps
+    RESOLUTION_PS=8000
+    if [ "$TARGET_OFFSET" -ge 0 ]; then
+        ROUNDED_PS=$(( (TARGET_OFFSET + RESOLUTION_PS/2) / RESOLUTION_PS * RESOLUTION_PS ))
+    else
+        ROUNDED_PS=$(( (TARGET_OFFSET - RESOLUTION_PS/2) / RESOLUTION_PS * RESOLUTION_PS ))
+    fi
+
+    ROUNDED_NS=$(( ROUNDED_PS / 1000 ))
+
+    # 5. Calculate the NEXT ABSOLUTE MINUTE BOUNDARY + offset
+    # We add 60 seconds, divide by 60, multiply by 60 to floor to the next minute.
+    START_TIME=$(( (PHC_TIME + 60) / 60 * 60 ))
+    
+    START_NSEC=$(( ROUNDED_NS ))
+    
+    # Handle nanosecond overflow
+    while [ "$START_NSEC" -lt 0 ]; do
+        START_NSEC=$(( START_NSEC + 1000000000 ))
+        START_TIME=$(( START_TIME - 1 ))
+    done
+    if [ "$START_NSEC" -ge 1000000000 ]; then
+        START_NSEC=$(( START_NSEC - 1000000000 ))
+        START_TIME=$(( START_TIME + 1 ))
+    fi
+
+    # 6. Write the period
+    if ! sudo sh -c "echo '0 $START_TIME $START_NSEC 1 0' > /sys/class/ptp/ptp0/period"; then
+        echo "ERROR: Failed to enable PPS."
+        return 1
+    fi
+
+    if [ "$ROUNDED_PS" -ne "$TARGET_OFFSET" ]; then
+        echo "Note: TARGET_OFFSET=${TARGET_OFFSET}ps rounded to ${ROUNDED_PS}ps (8 ns resolution)."
+    fi
+    echo "1-PPS enabled. First edge aligned to ABSOLUTE time: ${START_TIME}.${START_NSEC}."
+    return 0
+}
+
+# Initial activation before the loop starts
+ensure_pps_activated
+if [ $? -ne 0 ]; then
+    echo "Failed to activate PPS initially. Waiting for ptp4l to converge..."
 fi
 
-# 3. Get the current PHC time (seconds)
-PHC_TIME=$(sudo phc_ctl eth0 get | sed -n 's/.*clock time is \([0-9]*\)\..*/\1/p')
-if [ -z "$PHC_TIME" ]; then
-    echo "ERROR: Could not read the PHC clock. Is the link up?"
-    exit 1
-fi
-
-# 4. Round TARGET_OFFSET (ps) to the nearest 8000 ps (8 ns) hardware boundary.
-RESOLUTION_PS=8000
-if [ "$TARGET_OFFSET" -ge 0 ]; then
-    ROUNDED_PS=$(( (TARGET_OFFSET + RESOLUTION_PS/2) / RESOLUTION_PS * RESOLUTION_PS ))
-else
-    ROUNDED_PS=$(( (TARGET_OFFSET - RESOLUTION_PS/2) / RESOLUTION_PS * RESOLUTION_PS ))
-fi
-
-# Convert the rounded offset from picoseconds to nanoseconds for the sysfs write.
-ROUNDED_NS=$(( ROUNDED_PS / 1000 ))
-
-# 5. Compute the absolute start time = current PHC time + 3 s + phase offset.
-#    The nanoseconds field must be in [0, 1000000000).
-START_TIME=$(( PHC_TIME + 3 ))
-START_NSEC=$(( ROUNDED_NS ))
-while [ "$START_NSEC" -lt 0 ]; do
-    START_NSEC=$(( START_NSEC + 1000000000 ))
-    START_TIME=$(( START_TIME - 1 ))
-done
-if [ "$START_NSEC" -ge 1000000000 ]; then
-    START_NSEC=$(( START_NSEC - 1000000000 ))
-    START_TIME=$(( START_TIME + 1 ))
-fi
-
-# 6. Write the period: channel 0, start at START_TIME.START_NSEC, period 1 s.
-if ! sudo sh -c "echo '0 $START_TIME $START_NSEC 1 0' > /sys/class/ptp/ptp0/period"; then
-    echo "ERROR: Failed to enable PPS. Is the Ethernet cable plugged in and the link UP?"
-    exit 1
-fi
-
-if [ "$ROUNDED_PS" -ne "$TARGET_OFFSET" ]; then
-    echo "Note: TARGET_OFFSET=${TARGET_OFFSET}ps rounded to ${ROUNDED_PS}ps (8 ns resolution)."
-fi
-echo "1-PPS enabled. First edge at PHC time ${START_TIME}.${START_NSEC} (offset ${ROUNDED_PS} ps)."
+echo "Starting SyncE-PTP PI Phase Controller (Continuous: ${INTERVAL}s interval | Target: ${TARGET_OFFSET}ps)..."
 
 # ==========================================
 # --- Main Continuous Loop ---
 # ==========================================
 while true; do
+    # --- Ensure PPS is active at the start of every interval ---
+    ensure_pps_activated
+
     # --- Runtime Variables for this run ---
-#    UNWRAPPED_SAMPLES=()
     TICK_SAMPLES=()
     M3_SAMPLES=()
     AXI_OFFSET_SAMPLES=()
@@ -147,47 +147,18 @@ while true; do
     # Loop N times to collect samples
     for (( i=1; i<=$N; i++ ))
     do
-        # 1. Clear the kernel ring buffer so we don't read stale data
         sudo dmesg -c > /dev/null
         sleep 1.2
 
-#        sleep 0.80
-#        sudo phc_ctl $INTERFACE -- phaseadj 0 > /dev/null 2>&1
-#        sleep 0.20
-#
-#        val=$(dmesg | grep "PHC_PHASE_CLKOUT_PS:" | tail -1 | awk -F': ' '{print $NF}')
-#        
-#        # Strict check: Is it non-empty AND a valid integer?
-#        if ! [[ "$val" =~ ^-?[0-9]+$ ]]; then
-#            echo "Error: Invalid or missing offset from $INTERFACE at sample $i (Got: '$val')"
-#            continue
-#        fi
-#
-#        # Wrap the DP83640 measurement to a 16 ns window (-8 ns to +8 ns)
-#        # to match the DP83640's internal 8 ns resolution boundaries.
-#        val=$(( val % psCLK_OUTperiod ))
-#        if [ "$val" -gt "$psCLK_OUTperiodHalf" ]; then
-#            val=$(( val - psCLK_OUTperiod ))
-#        elif [ "$val" -le "-$psCLK_OUTperiodHalf" ]; then
-#            val=$(( val + psCLK_OUTperiod ))
-#        fi
-#
-#        # Store the unwrapped value in our array
-#        UNWRAPPED_SAMPLES+=("$val")
-
-        # --- Read Hardware Phase from FPGA during sample collection ---
+        # --- Read Hardware Phase from FPGA ---
         AXI_RAW_HEX=$(sudo devmem $AXI_PHASE_ADDR 32 2>/dev/null)
-        
-        # --- Read PPS & CLKOUT Timestamps ---
         PPS_HEX=$(sudo devmem $AXI_PPS_TS_ADDR 32 2>/dev/null)
         CLK_HEX=$(sudo devmem $AXI_CLKOUT_TS_ADDR 32 2>/dev/null)
         VALID_HEX=$(sudo devmem $AXI_VALID_ADDR 32 2>/dev/null)
         
-        # Strip the "0x" and leading zeros to ensure the comparison is safe
         VALID_CLEAN=$(echo "$VALID_HEX" | sed 's/0x//; s/^0*//')
         
         if [[ "$VALID_CLEAN" == "3" ]]; then
-            # Force Bash to read the hex as an unsigned 32-bit integer
             PPS_DEC=$((16#${PPS_HEX#0x}))
             CLK_DEC=$((16#${CLK_HEX#0x}))
             
@@ -200,24 +171,17 @@ while true; do
             
             M3_RAW_PS=$(( M3_RAW_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
             
-            # Wrap M3 to the CLK_OUT period (40 ns = 40000 ps).
-            # The FPGA measures the physical time to the next CLK_OUT edge,
-            # so the physical ambiguity is exactly one full 40 ns period.
-            # Wrap M3 to a 16 ns window (-8 ns to +8 ns) to match the DP83640's 8 ns boundaries.
+            # Wrap M3 to the CLK_OUT period (40 ns)
             M3_RAW_PS=$(( M3_RAW_PS % psCLK_OUTperiod ))
             if [ "$M3_RAW_PS" -gt "$psCLK_OUTperiodHalf" ]; then
                 M3_RAW_PS=$(( M3_RAW_PS - psCLK_OUTperiod ))
             fi
             
-            # Add to M3 array for averaging
             M3_SAMPLES+=("$M3_RAW_PS")
         fi
 
         if [[ "$VALID_CLEAN" == "3" ]] && [[ "$AXI_RAW_HEX" =~ ^0x[0-9a-fA-F]+$ ]]; then
-            # 1. Convert hex to unsigned decimal
             unsigned_val=$(printf "%d" "$AXI_RAW_HEX")
-            
-            # 2. Convert unsigned 32-bit to signed 32-bit
             if [ "$unsigned_val" -ge 2147483648 ]; then
                 curr_tick=$(( unsigned_val - 4294967296 ))
             else
@@ -226,9 +190,14 @@ while true; do
 
             # Calculate the AXI offset for this single sample (in ps)
             curr_axi_ps=$(( curr_tick * 2081 / 100 ))
-            curr_axi_ps=$(( ( curr_axi_ps % 8000 ) - 4000 ))
+            
+            # Wrap to the CLK_OUT period (40000 ps)
+            curr_axi_ps=$(( curr_axi_ps % psCLK_OUTperiod ))
+            if [ "$curr_axi_ps" -gt "$psCLK_OUTperiodHalf" ]; then
+                curr_axi_ps=$(( curr_axi_ps - psCLK_OUTperiod ))
+            fi
+            
             AXI_OFFSET_SAMPLES+=("$curr_axi_ps")
-
             TICK_SAMPLES+=("$curr_tick")
         fi
 
@@ -245,7 +214,6 @@ while true; do
         if [ ${#TICK_SAMPLES[@]} -eq 0 ]; then
             AXI_TICKS=0
         elif [ ${#TICK_SAMPLES[@]} -le $(( TRIM_COUNT * 2 )) ]; then
-            # Not enough samples to trim safely, fallback to a normal average
             echo "Warning: Not enough samples for trimmed average. Doing normal mean."
             TRIMMED_TICK_SUM=0
             for t_val in "${TICK_SAMPLES[@]}"; do
@@ -254,16 +222,13 @@ while true; do
             AXI_TICKS=$(( TRIMMED_TICK_SUM / ${#TICK_SAMPLES[@]} ))
         else
             SORTED_TICKS=($(printf "%s\n" "${TICK_SAMPLES[@]}" | sort -n))
-
             TRIMMED_TICK_SUM=0
             TRIMMED_COUNT=0
-
             for (( j=TRIM_COUNT; j<${#SORTED_TICKS[@]}-TRIM_COUNT; j++ ))
             do
                 TRIMMED_TICK_SUM=$(( TRIMMED_TICK_SUM + SORTED_TICKS[j] ))
                 TRIMMED_COUNT=$(( TRIMMED_COUNT + 1 ))
             done
-
             AXI_TICKS=$(( TRIMMED_TICK_SUM / TRIMMED_COUNT ))
         fi
 
@@ -315,23 +280,16 @@ while true; do
         # ==========================================
         # --- LOOP III: Average PPS vs CLK_OUT (M3) ---
         # ==========================================
-        # Use the simple trimmed average of the N samples directly.
         M3_FILTERED=$M3_AVG
 
         # ==========================================
         # --- LOOP I: Error Calculation ---
         # ==========================================
-#        COMPENSATED_PHASE=$(( RAW_AVERAGE ))
-        #ERROR=$(( COMPENSATED_PHASE - (TARGET_OFFSET - M3_FILTERED) ))
-        #ERROR=$(( M3_FILTERED - (TARGET_OFFSET + COMPENSATED_PHASE) ))
         ERROR=$(( M3_FILTERED - 0 ))
-
 
         # ==========================================
         # --- PI-Controller Math (Shortest Path) ---
         # ==========================================
-
-        # 1. Normalize Error to Shortest Path [-HalfPeriod, +HalfPeriod]
         ERROR=$(( ERROR % psCLK_OUTperiod ))
         if [ "$ERROR" -le -$psCLK_OUTperiodHalf ]; then
             ERROR=$(( ERROR + psCLK_OUTperiod ))
@@ -339,23 +297,17 @@ while true; do
             ERROR=$(( ERROR - psCLK_OUTperiod ))
         fi
 
-        # 2. Add Error to Integral Accumulator
         INTEGRAL_ACCUM=$(( INTEGRAL_ACCUM + ERROR ))
-
-        # 3. Anti-Windup (Cap the integral accumulator at ± half period)
         if [ "$INTEGRAL_ACCUM" -gt "$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=$psCLK_OUTperiodHalf
         elif [ "$INTEGRAL_ACCUM" -lt "-$psCLK_OUTperiodHalf" ]; then
             INTEGRAL_ACCUM=-$psCLK_OUTperiodHalf
         fi
 
-        # 4. Calculate P and I terms
         P_TERM=$(( (scaled_PIDp * ERROR) / scaled_PID_factor ))
         I_TERM=$(( (scaled_PIDi * INTEGRAL_ACCUM) / scaled_PID_factor ))
-
         CORRECTIONscaled=$(( P_TERM + I_TERM ))
 
-        # 5. Final Phase Output Wrap (Shortest Path logic for execution)
         CORRECTIONscaled=$(( CORRECTIONscaled % psCLK_OUTperiod ))
         if [ "$CORRECTIONscaled" -le -$psCLK_OUTperiodHalf ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled + psCLK_OUTperiod ))
@@ -363,31 +315,20 @@ while true; do
             CORRECTIONscaled=$(( CORRECTIONscaled - psCLK_OUTperiod ))
         fi
 
-        # ==========================================
-        # --- Execution ---
-        # ==========================================
-
         ABS_CORRECTION=${CORRECTIONscaled#-}
-
         if [[ "$CORRECTIONscaled" == -* ]]; then
             SIGN="-"
         else
             SIGN=""
         fi
-
-        # Format picoseconds into fractional seconds
         CORRECTION=$(printf -- "%s0.%012d" "$SIGN" "$ABS_CORRECTION")
 
         if [ "$PlotInfo" = "true" ]; then
-            # NOW clear the screen (this is the only place we clear),
-            # so the old summary disappears right before the new one appears.
             clear
-
             echo "--- PID DIAGNOSTICS ($(date +%T)) ---"
             if [ ${#M3_SAMPLES[@]} -gt $(( TRIM_COUNT * 2 )) ]; then
                 echo "M3 samples: ${#M3_SAMPLES[@]} valid, trimmed to $(( ${#M3_SAMPLES[@]} - 2 * TRIM_COUNT ))."
             fi
-#            echo "CLK_OUT Phase (DP83640): $RAW_AVERAGE ps"
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
 
@@ -404,6 +345,7 @@ while true; do
             echo "Sleeping for $INTERVAL seconds..."
         fi
 
+        # Only apply the correction if it is NOT zero
         if [ "$CORRECTIONscaled" -ne 0 ]; then
             sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
         fi
@@ -415,5 +357,4 @@ while true; do
     fi
 
     sleep "$INTERVAL"
-
 done
