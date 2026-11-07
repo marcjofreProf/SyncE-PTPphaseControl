@@ -51,7 +51,7 @@ INTEGRAL_ACCUM=0
 # ==========================================
 ensure_pps_activated() {
     if [ -f /sys/class/ptp/ptp0/period ]; then
-        # Use bash built-in redirect. This NEVER throws a permission error on sysfs.
+        # Read the file with a simple redirect. No cat.
         read -r CURRENT_PERIOD < /sys/class/ptp/ptp0/period 2>/dev/null
         
         # If the file is not empty and not the "disabled" string, it's active
@@ -186,7 +186,6 @@ while true; do
     if [ "$LOOP_COUNT" -eq 0 ]; then
         echo "Error: No samples collected."
     else
-        # Trimmed Averaging
         if [ ${#TICK_SAMPLES[@]} -eq 0 ]; then
             AXI_TICKS=0
         elif [ ${#TICK_SAMPLES[@]} -le $(( TRIM_COUNT * 2 )) ]; then
