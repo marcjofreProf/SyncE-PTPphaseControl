@@ -57,10 +57,19 @@ INTEGRAL_ACCUM=0
 ensure_pps_activated() {
     # Check if the PPS is already running
     if [ -f /sys/class/ptp/ptp0/period ]; then
-        CURRENT_PERIOD=$(cat /sys/class/ptp/ptp0/period)
-        if [[ "$CURRENT_PERIOD" != "0 0 0 0 0" ]] && [[ -n "$CURRENT_PERIOD" ]]; then
+        # Read the file using head (safer than cat)
+        CURRENT_PERIOD=$(head -n 1 /sys/class/ptp/ptp0/period 2>/dev/null)
+        
+        # DEBUG PRINT
+        echo "DEBUG: Current period file reads as: '$CURRENT_PERIOD'"
+
+        # If the file is not empty and not the "disabled" string, it's active
+        if [[ -n "$CURRENT_PERIOD" ]] && [[ "$CURRENT_PERIOD" != "0 0 0 0 0" ]]; then
+            echo "DEBUG: PPS is already active. Skipping reset."
             return 0 # PPS is already running, do nothing
         fi
+    else
+        echo "DEBUG: /sys/class/ptp/ptp0/period does not exist."
     fi
 
     echo "PPS is not active. Enabling 1-PPS on GPIO3..."
@@ -69,7 +78,7 @@ ensure_pps_activated() {
     sudo sh -c "echo '0 0 0 0 0' > /sys/class/ptp/ptp0/period" 2>/dev/null
 
     # 2. Check if GPIO3 is already configured as PEROUT
-    if [ "$(cat /sys/class/ptp/ptp0/pins/GPIO3 2>/dev/null)" != "2 0" ]; then
+    if [ "$(sudo cat /sys/class/ptp/ptp0/pins/GPIO3 2>/dev/null)" != "2 0" ]; then
         echo "Configuring GPIO3 as PEROUT..."
         sudo sh -c "echo '2 0' > /sys/class/ptp/ptp0/pins/GPIO3" || {
             echo "ERROR: Could not set GPIO3 to PEROUT."
@@ -95,7 +104,6 @@ ensure_pps_activated() {
     ROUNDED_NS=$(( ROUNDED_PS / 1000 ))
 
     # 5. Calculate the NEXT ABSOLUTE MINUTE BOUNDARY + offset
-    # We add 60 seconds, divide by 60, multiply by 60 to floor to the next minute.
     START_TIME=$(( (PHC_TIME + 60) / 60 * 60 ))
     
     START_NSEC=$(( ROUNDED_NS ))
