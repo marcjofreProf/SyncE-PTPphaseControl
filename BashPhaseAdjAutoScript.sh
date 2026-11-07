@@ -50,14 +50,9 @@ INTEGRAL_ACCUM=0
 # --- PPS Activation Function ---
 # ==========================================
 ensure_pps_activated() {
-    if [ -f /sys/class/ptp/ptp0/period ]; then
-        # Read the file with a simple redirect. No cat.
-        read -r CURRENT_PERIOD < /sys/class/ptp/ptp0/period 2>/dev/null
-        
-        # If the file is not empty and not the "disabled" string, it's active
-        if [[ -n "$CURRENT_PERIOD" ]] && [[ "$CURRENT_PERIOD" != "0 0 0 0 0" ]]; then
-            return 0 # PPS is already running, do nothing
-        fi
+    # Use a flag file in /tmp to remember if we already activated it.
+    if [ -f /tmp/ptp_pps_active.flag ]; then
+        return 0
     fi
 
     echo "PPS is not active. Enabling 1-PPS on GPIO3..."
@@ -110,9 +105,9 @@ ensure_pps_activated() {
         return 1
     fi
 
-    if [ "$ROUNDED_PS" -ne "$TARGET_OFFSET" ]; then
-        echo "Note: TARGET_OFFSET=${TARGET_OFFSET}ps rounded to ${ROUNDED_PS}ps."
-    fi
+    # Create the flag file so we don't activate it again
+    touch /tmp/ptp_pps_active.flag
+
     echo "1-PPS enabled. First edge aligned to ABSOLUTE time: ${START_TIME}.${START_NSEC}."
     return 0
 }
@@ -287,22 +282,10 @@ while true; do
         if [ "$PlotInfo" = "true" ]; then
             clear
             echo "--- PID DIAGNOSTICS ($(date +%T)) ---"
-            if [ ${#M3_SAMPLES[@]} -gt $(( TRIM_COUNT * 2 )) ]; then
-                echo "M3 samples: ${#M3_SAMPLES[@]} valid, trimmed to $(( ${#M3_SAMPLES[@]} - 2 * TRIM_COUNT ))."
-            fi
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
-
-            if [ "$TARGET_OFFSET" -ne 0 ]; then
-                echo "Target Setpoint Offset:  $TARGET_OFFSET ps (rounded to $ROUNDED_PS ps)"
-                echo "Hardware resolution:     ${RESOLUTION_PS} ps (8 ns)"
-            fi
-
-            echo "-----------------------"
             echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
-            echo "Applying P-Term: $P_TERM ps | I-Term: $I_TERM ps"
             echo "Total calculated step: $CORRECTIONscaled ps"
-            echo "======================="
             echo "Sleeping for $INTERVAL seconds..."
         fi
 
