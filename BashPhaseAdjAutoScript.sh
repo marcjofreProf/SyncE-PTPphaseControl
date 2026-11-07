@@ -404,7 +404,9 @@ while true; do
             echo "Sleeping for $INTERVAL seconds..."
         fi
 
-        sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
+        if [ "$CORRECTIONscaled" -ne 0 ]; then
+            sudo phc_ctl $INTERFACE -- phaseadj $CORRECTION
+        fi
     fi
 
     # --- Loop Control ---
