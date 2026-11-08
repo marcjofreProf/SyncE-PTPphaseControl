@@ -54,6 +54,7 @@ scaled_PIDp=550
 scaled_PIDi=25
 
 INTEGRAL_ACCUM=0
+BIAS_ESTIMATOR=0
 
 # ==========================================
 # --- PPS Activation Function ---
@@ -257,8 +258,26 @@ while true; do
 
         # Error = (Physical Phase from FPGA) - (Hardware SyncE Phase)
         M3_FILTERED=$M3_AVG
-        ERROR=$(( M3_FILTERED - AXI_AVG ))
+        RAW_ERROR=$(( M3_FILTERED - AXI_AVG ))
 
+        # Wrap the raw error to the shortest path [-20000, 20000]
+        RAW_ERROR=$(( RAW_ERROR % psCLK_OUTperiod ))
+        if [ "$RAW_ERROR" -le -$psCLK_OUTperiodHalf ]; then
+            RAW_ERROR=$(( RAW_ERROR + psCLK_OUTperiod ))
+        elif [ "$RAW_ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
+            RAW_ERROR=$(( RAW_ERROR - psCLK_OUTperiod ))
+        fi
+
+        # --- Bias Estimator ---
+        # Slowly learn the constant hardware offset (AXI bias)
+        # We use a very slow filter: 1/64th of the new error.
+        # This prevents the bias from adapting to fast noise, but it will track the constant offset.
+        BIAS_ESTIMATOR=$(( BIAS_ESTIMATOR + (RAW_ERROR - BIAS_ESTIMATOR) / 64 ))
+
+        # The actual error fed to the PI controller is the raw error minus the learned bias
+        ERROR=$(( RAW_ERROR - BIAS_ESTIMATOR ))
+
+        # Wrap the corrected error to the shortest path [-20000, 20000]
         ERROR=$(( ERROR % psCLK_OUTperiod ))
         if [ "$ERROR" -le -$psCLK_OUTperiodHalf ]; then
             ERROR=$(( ERROR + psCLK_OUTperiod ))
@@ -297,7 +316,9 @@ while true; do
             echo "--- PID DIAGNOSTICS ($(date +%T)) ---"
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
-            echo "Error (M3 - AXI):        $ERROR ps"
+            echo "Raw Error (M3 - AXI):    $RAW_ERROR ps"
+            echo "Learned Bias:            $BIAS_ESTIMATOR ps"
+            echo "Corrected Error:         $ERROR ps"
             echo "Accumulator:             $INTEGRAL_ACCUM ps"
             echo "Total calculated step: $CORRECTIONscaled ps"
             echo "Sleeping for $INTERVAL seconds..."
