@@ -7,6 +7,9 @@
 
 clear
 
+# Clean up the flag file from a previous run so PPS is re-aligned
+rm -f /tmp/ptp_pps_active.flag
+
 # --- CLI Arguments ---
 INTERVAL=${1:-15}
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]]; then
@@ -23,10 +26,16 @@ fi
 # --- Configuration ---
 PlotInfo=true
 INTERFACE="eth0"
-N=60
+N=30
 TRIM_COUNT=4
+
+# CLK_OUT Period (40 ns = 40000 ps)
 psCLK_OUTperiod=$(( 4000 * 10 ))
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
+
+# DP83640 SyncE/AXI Period wraped around DP83640 8ns resolution (8 ns = 8000 ps)
+AXI_PERIOD=8000
+AXI_PERIOD_HALF=$((AXI_PERIOD/2))
 
 # --- FPGA Hardware Offset Configuration ---
 AXI_PHASE_ADDR="0x43C00000"
@@ -36,7 +45,6 @@ AXI_VALID_ADDR="0x43C0000C"
 
 PS_PER_TICK=10000
 PS_PER_TICK_factor=1
-M3_FILTER_N=10
 M3_FILTERED=0
 
 # --- PI Controller Tuning ---
@@ -165,10 +173,13 @@ while true; do
                 curr_tick=$unsigned_val
             fi
 
+            # Convert ticks to picoseconds
             curr_axi_ps=$(( curr_tick * 2081 / 100 ))
-            curr_axi_ps=$(( curr_axi_ps % psCLK_OUTperiod ))
-            if [ "$curr_axi_ps" -gt "$psCLK_OUTperiodHalf" ]; then
-                curr_axi_ps=$(( curr_axi_ps - psCLK_OUTperiod ))
+            
+            # Wrap AXI to the DP83640 8ns resolution window [-4000, 4000]
+            curr_axi_ps=$(( curr_axi_ps % AXI_PERIOD ))
+            if [ "$curr_axi_ps" -gt "$AXI_PERIOD_HALF" ]; then
+                curr_axi_ps=$(( curr_axi_ps - AXI_PERIOD ))
             fi
             
             AXI_OFFSET_SAMPLES+=("$curr_axi_ps")
@@ -243,8 +254,9 @@ while true; do
             fi
         fi
 
+        # Error = (Physical Phase from FPGA) - (Hardware SyncE Phase)
         M3_FILTERED=$M3_AVG
-        ERROR=$(( M3_FILTERED - 0 ))
+        ERROR=$(( M3_FILTERED - AXI_AVG ))
 
         ERROR=$(( ERROR % psCLK_OUTperiod ))
         if [ "$ERROR" -le -$psCLK_OUTperiodHalf ]; then
@@ -284,7 +296,8 @@ while true; do
             echo "--- PID DIAGNOSTICS ($(date +%T)) ---"
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
-            echo "Error: $ERROR ps | Accumulator: $INTEGRAL_ACCUM ps"
+            echo "Error (M3 - AXI):        $ERROR ps"
+            echo "Accumulator:             $INTEGRAL_ACCUM ps"
             echo "Total calculated step: $CORRECTIONscaled ps"
             echo "Sleeping for $INTERVAL seconds..."
         fi
