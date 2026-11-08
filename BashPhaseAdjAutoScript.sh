@@ -27,7 +27,7 @@ fi
 # --- Configuration ---
 PlotInfo=true
 INTERFACE="eth0"
-N=55
+N=55             # Number of samples to average
 TRIM_COUNT=4
 
 # CLK_OUT Period (40 ns = 40000 ps)
@@ -142,7 +142,7 @@ while true; do
     for (( i=1; i<=$N; i++ ))
     do
         sudo dmesg -c > /dev/null
-        sleep 2.1
+        sleep 2.1      # It has to be larger than 1s to account for different measurements with respect the PPS signal
 
         AXI_RAW_HEX=$(sudo devmem $AXI_PHASE_ADDR 32 2>/dev/null)
         PPS_HEX=$(sudo devmem $AXI_PPS_TS_ADDR 32 2>/dev/null)
