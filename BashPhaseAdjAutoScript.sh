@@ -54,6 +54,7 @@ scaled_PIDp=550
 scaled_PIDi=25
 
 INTEGRAL_ACCUM=0
+BIAS_ACCUM=0        # Bias estimator in units of 1e-6 ps
 BIAS_ESTIMATOR=0
 
 # ==========================================
@@ -272,7 +273,9 @@ while true; do
         # Slowly learn the constant hardware offset (AXI bias)
         # We use a very slow filter: 1/64th of the new error.
         # This prevents the bias from adapting to fast noise, but it will track the constant offset.
-        BIAS_ESTIMATOR=$(( BIAS_ESTIMATOR + (RAW_ERROR - BIAS_ESTIMATOR) / 64 ))
+        # Bias Estimator (IIR filter with 1/64 gain, scaled by 1e6 to avoid truncation)
+        BIAS_ACCUM=$(( BIAS_ACCUM + (RAW_ERROR * 1000 - BIAS_ACCUM) / 64 ))
+        BIAS_ESTIMATOR=$(( BIAS_ACCUM / 1000 ))
 
         # The actual error fed to the PI controller is the raw error minus the learned bias
         ERROR=$(( RAW_ERROR - BIAS_ESTIMATOR ))
