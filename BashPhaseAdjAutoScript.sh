@@ -27,7 +27,7 @@ fi
 # --- Configuration ---
 PlotInfo=true
 INTERFACE="eth0"
-N=55             # Number of samples to average
+N=45             # Number of samples to average
 TRIM_COUNT=4
 
 # CLK_OUT Period (40 ns = 40000 ps)
@@ -51,7 +51,7 @@ M3_FILTERED=0
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000
 scaled_PIDp=550
-scaled_PIDi=75
+scaled_PIDi=150
 
 INTEGRAL_ACCUM=0
 BIAS_ACCUM=0        # Bias estimator in units of 1e-6 ps
