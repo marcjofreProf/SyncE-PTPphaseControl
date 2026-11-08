@@ -8,7 +8,7 @@
 clear
 
 # Clean up the flag file from a previous run so PPS is re-aligned
-sudo chmod a+wrx ./BashPhaseAdjAutoScript.sh
+# Make sure that execution rights are properly set: sudo chmod a+wrx ./BashPhaseAdjAutoScript.sh
 rm -f /tmp/ptp_pps_active.flag
 
 # --- CLI Arguments ---
