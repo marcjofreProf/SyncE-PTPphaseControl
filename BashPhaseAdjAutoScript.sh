@@ -26,7 +26,7 @@ fi
 # --- Configuration ---
 PlotInfo=true
 INTERFACE="eth0"
-N=30
+N=35
 TRIM_COUNT=4
 
 # CLK_OUT Period (40 ns = 40000 ps)
