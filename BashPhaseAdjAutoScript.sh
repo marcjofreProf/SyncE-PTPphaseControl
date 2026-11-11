@@ -34,8 +34,8 @@ TRIM_COUNT=4
 psCLK_OUTperiod=$(( 4000 * 10 ))
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
-# AXI SyncE TX/RX Clock Period (25 MHz = 40 ns = 40000 ps)
-AXI_PERIOD=$(( 4000 * 10 ))
+# AXI SyncE TX/RX Clock Period (25 MHz = 40 ns = 40000 ps), but linked to the DP83640 8ns resolution
+AXI_PERIOD=$(( 8000 ))
 AXI_PERIOD_HALF=$((AXI_PERIOD/2))
 
 # --- FPGA Hardware Offset Configuration ---
