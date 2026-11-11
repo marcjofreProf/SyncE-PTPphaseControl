@@ -259,7 +259,7 @@ while true; do
 
         # Error = (Physical Phase from FPGA) - (Hardware SyncE Phase)
         M3_FILTERED=$M3_AVG
-        # For a Master board the RAW_ERROR is: RAW_ERROR=$(( M3_FILTERED ))
+        # For a Master board the RAW_ERROR is: RAW_ERROR=$(( M3_FILTERED - AXI_AVG ))
         RAW_ERROR=$(( M3_FILTERED + AXI_AVG ))
 
         # Wrap the raw error to the shortest path [-20000, 20000]
