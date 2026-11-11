@@ -162,7 +162,7 @@ while true; do
             
             M3_RAW_PS=$(( M3_RAW_TICKS * PS_PER_TICK / PS_PER_TICK_factor ))
             M3_RAW_PS=$(( M3_RAW_PS % psCLK_OUTperiod ))
-            if [ "$M3_RAW_PS" -gt "$psCLK_OUTperiodHalf" ]; then
+            if [ "$M3_RAW_PS" -ge "$psCLK_OUTperiodHalf" ]; then
                 M3_RAW_PS=$(( M3_RAW_PS - psCLK_OUTperiod ))
             fi
             M3_SAMPLES+=("$M3_RAW_PS")
@@ -181,7 +181,7 @@ while true; do
             
             # Wrap AXI to the DP83640 8ns resolution window [-4000, 4000]
             curr_axi_ps=$(( curr_axi_ps % AXI_PERIOD ))
-            if [ "$curr_axi_ps" -gt "$AXI_PERIOD_HALF" ]; then
+            if [ "$curr_axi_ps" -ge "$AXI_PERIOD_HALF" ]; then
                 curr_axi_ps=$(( curr_axi_ps - AXI_PERIOD ))
             fi
             
@@ -263,9 +263,9 @@ while true; do
 
         # Wrap the raw error to the shortest path [-20000, 20000]
         RAW_ERROR=$(( RAW_ERROR % psCLK_OUTperiod ))
-        if [ "$RAW_ERROR" -le -$psCLK_OUTperiodHalf ]; then
+        if [ "$RAW_ERROR" -lt "-$psCLK_OUTperiodHalf" ]; then
             RAW_ERROR=$(( RAW_ERROR + psCLK_OUTperiod ))
-        elif [ "$RAW_ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
+        elif [ "$RAW_ERROR" -ge "$psCLK_OUTperiodHalf" ]; then
             RAW_ERROR=$(( RAW_ERROR - psCLK_OUTperiod ))
         fi
 
@@ -282,9 +282,9 @@ while true; do
 
         # Wrap the corrected error to the shortest path [-20000, 20000]
         ERROR=$(( ERROR % psCLK_OUTperiod ))
-        if [ "$ERROR" -le -$psCLK_OUTperiodHalf ]; then
+        if [ "$ERROR" -lt "-$psCLK_OUTperiodHalf" ]; then
             ERROR=$(( ERROR + psCLK_OUTperiod ))
-        elif [ "$ERROR" -gt "$psCLK_OUTperiodHalf" ]; then
+        elif [ "$ERROR" -ge "$psCLK_OUTperiodHalf" ]; then
             ERROR=$(( ERROR - psCLK_OUTperiod ))
         fi
 
@@ -300,9 +300,9 @@ while true; do
         CORRECTIONscaled=$(( P_TERM + I_TERM ))
 
         CORRECTIONscaled=$(( CORRECTIONscaled % psCLK_OUTperiod ))
-        if [ "$CORRECTIONscaled" -le -$psCLK_OUTperiodHalf ]; then
+        if [ "$CORRECTIONscaled" -lt "-$psCLK_OUTperiodHalf" ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled + psCLK_OUTperiod ))
-        elif [ "$CORRECTIONscaled" -gt "$psCLK_OUTperiodHalf" ]; then
+        elif [ "$CORRECTIONscaled" -ge "$psCLK_OUTperiodHalf" ]; then
             CORRECTIONscaled=$(( CORRECTIONscaled - psCLK_OUTperiod ))
         fi
 
