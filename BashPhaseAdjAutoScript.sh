@@ -319,7 +319,7 @@ while true; do
             echo "--- PID DIAGNOSTICS ($(date +%T)) ---"
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
-            echo "Raw Error (M3 - AXI):    $RAW_ERROR ps"
+            echo "Raw Error (M3 + AXI):    $RAW_ERROR ps"
             echo "Learned Bias:            $BIAS_ESTIMATOR ps"
             echo "Corrected Error:         $ERROR ps"
             echo "Accumulator:             $INTEGRAL_ACCUM ps"
