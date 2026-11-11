@@ -34,8 +34,8 @@ TRIM_COUNT=4
 psCLK_OUTperiod=$(( 4000 * 10 ))
 psCLK_OUTperiodHalf=$((psCLK_OUTperiod/2))
 
-# DP83640 SyncE/AXI Period wraped around DP83640 8ns resolution (8 ns = 8000 ps)
-AXI_PERIOD=8000
+# AXI SyncE TX/RX Clock Period (25 MHz = 40 ns = 40000 ps)
+AXI_PERIOD=$(( 4000 * 10 ))
 AXI_PERIOD_HALF=$((AXI_PERIOD/2))
 
 # --- FPGA Hardware Offset Configuration ---
@@ -97,8 +97,8 @@ ensure_pps_activated() {
 
     ROUNDED_NS=$(( ROUNDED_PS / 1000 ))
 
-    # 5. Calculate the NEXT ABSOLUTE MINUTE BOUNDARY + offset
-    START_TIME=$(( (PHC_TIME + 60) / 60 * 60 ))
+    # 5. Calculate the NEXT ABSOLUTE 10-SECOND BOUNDARY + offset
+    START_TIME=$(( ((PHC_TIME + 10) / 10) * 10 ))
     START_NSEC=$(( ROUNDED_NS ))
     
     while [ "$START_NSEC" -lt 0 ]; do
@@ -273,7 +273,7 @@ while true; do
         # Slowly learn the constant hardware offset (AXI bias)
         # We use a very slow filter: 1/64th of the new error.
         # This prevents the bias from adapting to fast noise, but it will track the constant offset.
-        # Bias Estimator (IIR filter with 1/64 gain, scaled by 1e6 to avoid truncation)
+        # Bias Estimator (IIR filter with 1/64 gain, scaled by 1000 to avoid truncation)
         BIAS_ACCUM=$(( BIAS_ACCUM + (RAW_ERROR * 1000 - BIAS_ACCUM) / 64 ))
         BIAS_ESTIMATOR=$(( BIAS_ACCUM / 1000 ))
 
