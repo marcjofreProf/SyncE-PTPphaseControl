@@ -51,7 +51,7 @@ M3_FILTERED=0
 # --- PI Controller Tuning ---
 scaled_PID_factor=1000
 scaled_PIDp=550
-scaled_PIDi=150
+scaled_PIDi=50
 
 INTEGRAL_ACCUM=0
 BIAS_ACCUM=0        # Bias estimator in units of 1e-6 ps
