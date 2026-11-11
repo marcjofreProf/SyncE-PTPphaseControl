@@ -27,7 +27,7 @@ fi
 # --- Configuration ---
 PlotInfo=true
 INTERFACE="eth0"
-N=45             # Number of samples to average
+N=75             # Number of samples to average
 TRIM_COUNT=4
 
 # CLK_OUT Period (40 ns = 40000 ps)
