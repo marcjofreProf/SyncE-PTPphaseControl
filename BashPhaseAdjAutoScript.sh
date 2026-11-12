@@ -209,7 +209,7 @@ ensure_pps_activated() {
 # Initial activation
 ensure_pps_activated
 
-echo "Starting SyncE-PTP PI Phase Controller (Continuous: ${INTERVAL}s interval | Target: ${TARGET_OFFSET}ps)..."
+echo "Starting SyncE-PTP PI Phase Controller (Continuous: ${INTERVAL}s interval | PPS offset: ${TARGET_OFFSET}ps | CLK_OUT offset: ${CLK_OUT_OFFSET_PS}ps) ..."
 
 # ==========================================
 # --- Main Continuous Loop ---
