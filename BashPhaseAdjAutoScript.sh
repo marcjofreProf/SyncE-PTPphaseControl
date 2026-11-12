@@ -34,7 +34,7 @@
 #
 #   3. CLK_OUT_OFFSET_PS (default: 0)
 #      Fine CLK_OUT offset in picoseconds.
-#      Potentially operating with teh values reported by the SyncE/PTP tranparent switches.
+#      Potentially operating with the values reported by the SyncE/PTP tranparent switches.
 #      For CTC union, the parameters reported in: PTP Clock's Port Data Set Configuration
 #      This value has NO hardware resolution limit (but ps); the PI loop uses phc_ctl phaseadj
 #      to shift the CLK_OUT by exactly this amount, in single-picosecond steps.
