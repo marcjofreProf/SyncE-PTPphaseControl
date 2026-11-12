@@ -1,9 +1,85 @@
 #!/bin/bash
 # Bash script to automatically execute the PI phase adjustment algorithm for SynE-PTP
-# Usage: 
-#   ./BashPhaseAdjAutoScript.sh             (Runs continuously, 15s interval, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 30          (Runs continuously, 30s interval, target is 0 ps)
-#   ./BashPhaseAdjAutoScript.sh 15 500      (Runs continuously, 15s interval, locks phase at +500 ps)
+# ==============================================================================
+# SyncE-PTP PI Phase Controller
+# ==============================================================================
+#
+# USAGE:
+#   ./BashPhaseAdjAutoScript.sh [INTERVAL] [TARGET_OFFSET] [CLK_OUT_OFFSET_PS]
+#
+# ARGUMENTS:
+#
+#   1. INTERVAL (default: 15)
+#      How often the PI loop runs, in seconds. The loop collects N samples
+#      over roughly N * 2.1 seconds, so INTERVAL should be larger than the
+#      sampling time (e.g., 15 or 30 seconds).
+#
+#   2. TARGET_OFFSET (default: 0)
+#      Coarse PPS offset in picoseconds. This value is rounded to the
+#      nearest multiple of 8000 ps (the DP83640's internal counter
+#      resolution) and shifts the physical position of the PPS edge
+#      relative to the absolute 10-second boundary.
+#
+#      IMPORTANT: TARGET_OFFSET is always rounded to a multiple of 8000 ps.
+#      Values that are not multiples of 8000 will be rounded. For example:
+#          0       ->    0 ps
+#          4000    -> 8000 ps
+#          8000    -> 8000 ps
+#        -12000    -> -16000 ps
+#          20000    -> 16000 ps
+#
+#      This limit comes from the DP83640's internal 125 MHz clock, which
+#      can only fire the PPS trigger on 8 ns boundaries. There is no
+#      way to make the PPS fire at, for example, +500 ps.
+#
+#   3. CLK_OUT_OFFSET_PS (default: 0)
+#      Fine CLK_OUT offset in picoseconds.
+#      Potentially operating with teh values reported by the SyncE/PTP tranparent switches.
+#      For CTC union, the parameters reported in: PTP Clock's Port Data Set Configuration
+#      This value has NO hardware resolution limit (but ps); the PI loop uses phc_ctl phaseadj
+#      to shift the CLK_OUT by exactly this amount, in single-picosecond steps.
+#
+#      This argument is used to compensate for external asymmetries
+#      (switch path delays, PCB trace length differences, etc.) that
+#      are measured externally. It does NOT move the PPS edge; it
+#      only changes the PI loop's target for CLK_OUT.
+#
+#      For example, if your SyncE/PTP switches introduce a -1500 ps
+#      delay on the slave node, pass -1500 as the third argument to
+#      cancel it.
+#
+# EXAMPLES:
+#
+#   ./BashPhaseAdjAutoScript.sh
+#       Default: 15s interval, PPS at 0 ps, CLK_OUT target at 0 ps.
+#
+#   ./BashPhaseAdjAutoScript.sh 30
+#       Run every 30 seconds, PPS at 0 ps, CLK_OUT target at 0 ps.
+#
+#   ./BashPhaseAdjAutoScript.sh 15 8000
+#       PPS fires at +8000 ps from the 10-second boundary.
+#       CLK_OUT target is 0 ps from that PPS edge.
+#
+#   ./BashPhaseAdjAutoScript.sh 15 0 -1500
+#       PPS fires at the 10-second boundary.
+#       CLK_OUT is shifted by -1500 ps to compensate for external
+#       switch path delay. This is the recommended way to align two
+#       boards whose network paths are asymmetric.
+#
+#   ./BashPhaseAdjAutoScript.sh 15 16000 -1500
+#       Combined: PPS fires at +16000 ps, and CLK_OUT is further
+#       shifted by -1500 ps relative to that PPS.
+#
+# NOTE ON UNITS:
+#   All arguments related to offsets are in PICOSECONDS.
+#   1 ns = 1000 ps. 1 ps = 10^-12 s.
+#
+# NOTE ON PPS ACTIVATION:
+#   The PPS is aligned to the next absolute 10-second boundary
+#   (e.g., :00, :10, :20, ...) at startup, so all nodes begin firing
+#   at the same absolute time regardless of when their scripts started.
+#   A flag file in /tmp prevents accidental re-alignment on every loop.
+# ==============================================================================
 
 clear
 
@@ -20,7 +96,14 @@ fi
 
 TARGET_OFFSET=${2:-0}
 if ! [[ "$TARGET_OFFSET" =~ ^-?[0-9]+$ ]]; then
-    echo "Error: Target offset must be an integer."
+    echo "Error: PPS offset must be an integer."
+    exit 1
+fi
+
+# 3. CLK_OUT Compensation Offset (in ps)
+CLK_OUT_OFFSET_PS=${3:-0}
+if ! [[ "$CLK_OUT_OFFSET_PS" =~ ^-?[0-9]+$ ]]; then
+    echo "Error: CLK_OUT offset must be an integer (e.g., -2000 or 1500)."
     exit 1
 fi
 
@@ -257,9 +340,9 @@ while true; do
             fi
         fi
 
-        # Error = (Physical Phase from FPGA) - (Hardware SyncE Phase)
+        # Error = (Physical Phase from FPGA) - (Hardware SyncE Phase) - (External CLK_OUT Compensation)
         M3_FILTERED=$M3_AVG
-        RAW_ERROR=$(( M3_FILTERED - AXI_AVG ))
+        RAW_ERROR=$(( M3_FILTERED - AXI_AVG - CLK_OUT_OFFSET_PS ))
 
         # Wrap the raw error to the shortest path [-20000, 20000]
         RAW_ERROR=$(( RAW_ERROR % psCLK_OUTperiod ))
@@ -320,6 +403,7 @@ while true; do
             echo "PPS vs CLK_OUT (M3):     $M3_AVG ps"
             echo "SyncE TX/RX (Diag):      $AXI_TICKS ticks -> $AXI_AVG ps"
             echo "Raw Error (M3 - AXI):    $RAW_ERROR ps"
+            echo "CLK_OUT Compensation:    $CLK_OUT_OFFSET_PS ps"
             echo "Learned Bias:            $BIAS_ESTIMATOR ps"
             echo "Corrected Error:         $ERROR ps"
             echo "Accumulator:             $INTEGRAL_ACCUM ps"
